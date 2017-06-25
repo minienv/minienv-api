@@ -1,0 +1,48 @@
+apiVersion: extensions/v1beta1
+kind: Deployment 
+metadata:
+  name: $deploymentName
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: $appLabel
+    spec:
+      containers:
+        - name: exampleup
+          image: localhost:5000/markwatsonatx/exampleup:latest
+          volumeMounts:
+            - mountPath: "/var/lib/docker"
+              name: docker-storage
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "1024Mi"
+              cpu: "1000m"
+          securityContext:
+            privileged: true
+          env:
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+          - name: EXUP_ALLOW_ORIGIN
+            value: "$allowOrigin"
+          - name: EXUP_STORAGE_DRIVER
+            value: "$storageDriver"
+          - name: EXUP_LOG_PORT
+            value: "$logPort"
+          - name: EXUP_EDITOR_PORT
+            value: "$editorPort"
+          - name: EXUP_PROXY_PORT
+            value: "$proxyPort"
+          - name: EXUP_GIT_REPO
+            value: "$gitRepo"
+      volumes:
+        - name: docker-storage
+          persistentVolumeClaim:
+            claimName: $pvcName
+      terminationGracePeriodSeconds: 10
