@@ -678,7 +678,7 @@ func deployExample(userId string, gitRepo string, storageDriver string, pvTempla
 	if exampleupConfig.Proxy != nil && exampleupConfig.Proxy.Ports != nil && len(*exampleupConfig.Proxy.Ports) > 0 {
 		for _, proxyPort := range *exampleupConfig.Proxy.Ports {
 			if proxyPort.Hide == true {
-				// TODO:
+				// ignore
 			} else if proxyPort.Tabs != nil && len(*proxyPort.Tabs) > 0 {
 				for i, proxyTab := range *proxyPort.Tabs {
 					if i == 0 {
