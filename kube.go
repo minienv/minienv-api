@@ -646,31 +646,36 @@ func deployExample(userId string, gitRepo string, storageDriver string, pvTempla
 
 		}
 	}
-	// download docker-compose yaml
+	// download docker-compose file (first try yml, then yaml)
 	tabs := []*Tab{}
 	dockerComposeUrl := fmt.Sprintf("%s/raw/master/docker-compose.yml", gitRepo)
 	log.Printf("Downloading docker-compose file from '%s'...\n", dockerComposeUrl)
 	client = getHttpClient()
 	req, err = http.NewRequest("GET", dockerComposeUrl, nil)
 	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != 200 {
+		log.Println("Error downloading docker-compose.yml: ", err)
+		dockerComposeUrl := fmt.Sprintf("%s/raw/master/docker-compose.yaml", gitRepo)
+		req, err = http.NewRequest("GET", dockerComposeUrl, nil)
+		resp, err = client.Do(req)
+		if err != nil || resp.StatusCode != 200 {
+			log.Println("Error downloading docker-compose.yaml: ", err)
+			return nil, err
+		}
+	}
+	m := make(map[interface{}]interface{})
+	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Println("Error downloading docker-compose file: ", err)
 		return nil, err
 	} else {
-		m := make(map[interface{}]interface{})
-		data, err := ioutil.ReadAll(resp.Body)
+		err = yaml.Unmarshal(data, &m)
 		if err != nil {
-			log.Println("Error downloading docker-compose file: ", err)
+			log.Println("Error parsing docker-compose file: ", err)
 			return nil, err
 		} else {
-			err = yaml.Unmarshal(data, &m)
-			if err != nil {
-				log.Println("Error parsing docker-compose file: ", err)
-				return nil, err
-			} else {
-				for k, v := range m {
-					populateTabs(v, &tabs, k.(string))
-				}
+			for k, v := range m {
+				populateTabs(v, &tabs, k.(string))
 			}
 		}
 	}
