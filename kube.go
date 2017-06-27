@@ -805,7 +805,7 @@ func deployExample(userId string, gitRepo string, storageDriver string, pvTempla
 			}
 		}
 		details := &DeploymentDetails{}
-		details.NodeHostName = os.Getenv("EXUP_NODE_HOST_NAME") // mw:TODO
+		details.NodeHostName = os.Getenv("MINIENV_NODE_HOST_NAME") // mw:TODO
 		details.LogPort = logNodePort
 		details.LogUrl = fmt.Sprintf("http://%s:%d", details.NodeHostName, details.LogPort)
 		details.EditorPort = editorNodePort

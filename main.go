@@ -217,15 +217,15 @@ func main() {
 	kubeServiceBaseUrl += kubeServiceHost
 	kubeServiceBaseUrl += ":"
 	kubeServiceBaseUrl += kubeServicePort
-	kubeNamespace = os.Getenv("EXUP_NAMESPACE")
+	kubeNamespace = os.Getenv("MINIENV_NAMESPACE")
 	if kubeNamespace == "" {
 		kubeNamespace = "default"
 	}
-	storageDriver = os.Getenv("EXUP_STORAGE_DRIVER")
+	storageDriver = os.Getenv("MINIENV_STORAGE_DRIVER")
 	if storageDriver == "" {
 		storageDriver = "aufs"
 	}
-	allowOrigin = os.Getenv("EXUP_ALLOW_ORIGIN")
+	allowOrigin = os.Getenv("MINIENV_ALLOW_ORIGIN")
 	http.HandleFunc("/api/ping", addCorsAndCacheHeadersThenServe(ping))
 	http.HandleFunc("/api/up", addCorsAndCacheHeadersThenServe(up))
 	err := http.ListenAndServe(":"+os.Args[1], nil)
