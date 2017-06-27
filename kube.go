@@ -629,9 +629,9 @@ func deleteExample(userId string, kubeServiceToken string, kubeServiceBaseUrl st
 func deployExample(userId string, gitRepo string, storageDriver string, pvTemplate string, pvcTemplate string, deploymentTemplate string, serviceTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*DeploymentDetails, error) {
 	// delete example, if it exists
 	deleteExample(userId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
-	// download exampleup.json
+	// download minienv.json
 	var exampleupConfig ExampleUpConfig
-	exampleupConfigUrl := fmt.Sprintf("%s/raw/master/exampleup.json", gitRepo)
+	exampleupConfigUrl := fmt.Sprintf("%s/raw/master/minienv.json", gitRepo)
 	log.Printf("Downloading exampleup config from '%s'...\n", exampleupConfigUrl)
 	client := getHttpClient()
 	req, err := http.NewRequest("GET", exampleupConfigUrl, nil)
