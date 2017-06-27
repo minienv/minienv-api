@@ -137,29 +137,29 @@ type DeleteServiceResponse struct {
 	Kind string `json:"kind"`
 }
 
-type ExampleUpConfig struct {
-	Editor *ExampleUpConfigEditor `json:"editor"`
-	Proxy *ExampleUpConfigProxy `json:"proxy"`
+type MinienvConfig struct {
+	Editor *MinienvConfigEditor `json:"editor"`
+	Proxy *MinienvConfigProxy `json:"proxy"`
 }
 
-type ExampleUpConfigEditor struct {
+type MinienvConfigEditor struct {
 	Hide bool `json:"hide"`
 	SrcDir string `json:"srcDir"`
 }
 
-type ExampleUpConfigProxy struct {
-	Ports *[]ExampleUpConfigProxyPort `json:"ports"`
+type MinienvConfigProxy struct {
+	Ports *[]MinienvConfigProxyPort `json:"ports"`
 }
 
-type ExampleUpConfigProxyPort struct {
+type MinienvConfigProxyPort struct {
 	Port int `json:"port"`
 	Hide bool `json:"hide"`
 	Name string `json:"name"`
 	Path string `json:"path"`
-	Tabs *[]ExampleUpConfigProxyPortTab `json:"tabs"`
+	Tabs *[]MinienvConfigProxyPortTab `json:"tabs"`
 }
 
-type ExampleUpConfigProxyPortTab struct {
+type MinienvConfigProxyPortTab struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 }
@@ -630,18 +630,18 @@ func deployExample(userId string, gitRepo string, storageDriver string, pvTempla
 	// delete example, if it exists
 	deleteExample(userId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	// download minienv.json
-	var exampleupConfig ExampleUpConfig
-	exampleupConfigUrl := fmt.Sprintf("%s/raw/master/minienv.json", gitRepo)
-	log.Printf("Downloading exampleup config from '%s'...\n", exampleupConfigUrl)
+	var minienvConfig MinienvConfig
+	minienvConfigUrl := fmt.Sprintf("%s/raw/master/minienv.json", gitRepo)
+	log.Printf("Downloading minienv config from '%s'...\n", minienvConfigUrl)
 	client := getHttpClient()
-	req, err := http.NewRequest("GET", exampleupConfigUrl, nil)
+	req, err := http.NewRequest("GET", minienvConfigUrl, nil)
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Println("Error downloading exampleup config: ", err)
+		log.Println("Error downloading minienv config: ", err)
 	} else {
-		err = json.NewDecoder(resp.Body).Decode(&exampleupConfig)
+		err = json.NewDecoder(resp.Body).Decode(&minienvConfig)
 		if err != nil {
-			log.Println("Error downloading exampleup config: ", err)
+			log.Println("Error downloading minienv config: ", err)
 		} else {
 
 		}
@@ -680,8 +680,8 @@ func deployExample(userId string, gitRepo string, storageDriver string, pvTempla
 		}
 	}
 	// populate docker compose names and paths
-	if exampleupConfig.Proxy != nil && exampleupConfig.Proxy.Ports != nil && len(*exampleupConfig.Proxy.Ports) > 0 {
-		for _, proxyPort := range *exampleupConfig.Proxy.Ports {
+	if minienvConfig.Proxy != nil && minienvConfig.Proxy.Ports != nil && len(*minienvConfig.Proxy.Ports) > 0 {
+		for _, proxyPort := range *minienvConfig.Proxy.Ports {
 			if proxyPort.Hide == true {
 				// ignore
 			} else if proxyPort.Tabs != nil && len(*proxyPort.Tabs) > 0 {
@@ -810,12 +810,12 @@ func deployExample(userId string, gitRepo string, storageDriver string, pvTempla
 		details.LogUrl = fmt.Sprintf("http://%s:%d", details.NodeHostName, details.LogPort)
 		details.EditorPort = editorNodePort
 		details.EditorUrl = fmt.Sprintf("http://%s:%d", details.NodeHostName, details.EditorPort)
-		if exampleupConfig.Editor != nil {
-			if exampleupConfig.Editor.Hide {
+		if minienvConfig.Editor != nil {
+			if minienvConfig.Editor.Hide {
 				details.EditorPort = 0
 				details.EditorUrl = ""
-			} else if exampleupConfig.Editor.SrcDir != "" {
-				details.EditorUrl += "?src=" + url.QueryEscape(exampleupConfig.Editor.SrcDir)
+			} else if minienvConfig.Editor.SrcDir != "" {
+				details.EditorUrl += "?src=" + url.QueryEscape(minienvConfig.Editor.SrcDir)
 			}
 		}
 		details.ProxyPort = proxyNodePort
