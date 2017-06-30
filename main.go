@@ -9,9 +9,12 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
-var deployments map[string]*Deployment = make(map[string]*Deployment)
+var maxEnvironments = 2
+var environments map[string]*Environment = make(map[string]*Environment)
 var examplePvTemplate string
 var examplePvcTemplate string
 var exampleDeploymentTemplate string
@@ -22,24 +25,37 @@ var kubeNamespace string
 var storageDriver string
 var allowOrigin string
 
-type Deployment struct {
-	UserId string
+type Environment struct {
+	ClaimId string
+	ClaimToken string
 	UpRequest *UpRequest
 	UpResponse *UpResponse
 }
 
+type ClaimRequest struct {
+	Authorization string `json:"authorization"` // TODO:future support authentication
+}
+
+type ClaimResponse struct {
+	ClaimGranted bool `json:"claimGranted"`
+	ClaimToken string `json:"claimToken"`
+	ClaimId string `json:"claimId"`
+	Message string `json:"message"`
+}
+
 type PingRequest struct {
-	UserId string `json:"userId"`
+	ClaimToken string `json:"claimToken"`
 	GetUpDetails bool `json:"getUpDetails"`
 }
 
 type PingResponse struct {
+	ClaimGranted bool `json:"claimGranted"`
 	Up bool `json:"up"`
 	UpDetails *UpResponse `json:"upDetails"`
 }
 
 type UpRequest struct {
-	UserId string `json:"userId"`
+	ClaimToken string `json:"claimToken"`
 	Repo string `json:"repo"`
 }
 
@@ -51,31 +67,74 @@ type UpResponse struct {
 	DeployToBluemix bool `json:"deployToBluemix"`
 }
 
-func ping(w http.ResponseWriter, r *http.Request) {
+func claim(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
-		http.Error(w, "Invalid request", 400)
+		http.Error(w, "Invalid claim request", 400)
 	}
 	if r.Body == nil {
-		log.Println("Invalid request; Body is nil.")
-		http.Error(w, "Invalid request", 400)
+		log.Println("Invalid claim request; Body is nil.")
+		http.Error(w, "Invalid claim request", 400)
+		return
+	}
+	// decode request
+	var claimRequest ClaimRequest
+	err := json.NewDecoder(r.Body).Decode(&claimRequest)
+	if err != nil {
+		log.Println("Error decoding claim request: ", err)
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	// create response
+	var claimResponse = ClaimResponse{}
+	if len(environments) >= maxEnvironments {
+		// max environment exceeded - do not grant claim
+		claimResponse.ClaimGranted = false
+		claimResponse.Message = "No more claims available"
+	} else {
+		// ok, grant claim and create new environment
+		claimToken, _ := uuid.NewRandom()
+		claimResponse.ClaimGranted = true
+		claimResponse.ClaimToken = claimToken.String()
+		claimResponse.ClaimId = strconv.Itoa(len(environments) + 1)
+		environment := &Environment{ClaimId: claimResponse.ClaimId, ClaimToken: claimResponse.ClaimToken}
+		environments[claimResponse.ClaimToken] = environment
+	}
+	err = json.NewEncoder(w).Encode(&claimResponse)
+	if err != nil {
+		log.Println("Error encoding claim response: ", err)
+		http.Error(w, err.Error(), 400)
+		return
+	}
+}
+
+func ping(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Invalid ping request", 400)
+	}
+	if r.Body == nil {
+		log.Println("Invalid ping request; Body is nil.")
+		http.Error(w, "Invalid ping request", 400)
 		return
 	}
 	// decode request
 	var pingRequest PingRequest
 	err := json.NewDecoder(r.Body).Decode(&pingRequest)
 	if err != nil {
-		log.Println("Error decoding request: ", err)
+		log.Println("Error decoding ping request: ", err)
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	// create response
-	var pingResponse = PingResponse{}
-	deployment, ok := deployments[pingRequest.UserId]
-	if ok {
-		pingResponse.Up = true
-		if pingRequest.GetUpDetails {
+	var pingResponse= PingResponse{}
+	environment, ok := environments[pingRequest.ClaimToken]
+	if ! ok {
+		pingResponse.ClaimGranted = false
+		pingResponse.Up = false
+	} else {
+		pingResponse.ClaimGranted = true
+		pingResponse.Up = environment.UpRequest != nil && environment.UpResponse != nil
+		if pingResponse.Up && pingRequest.GetUpDetails {
 			// make sure to check if it is really running
-			exists, err := isExampleDeployed(pingRequest.UserId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			exists, err := isExampleDeployed(environment.ClaimId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
 				log.Println("Error querying Kubernetes: ", err)
 				http.Error(w, err.Error(), 400)
@@ -83,15 +142,16 @@ func ping(w http.ResponseWriter, r *http.Request) {
 			}
 			pingResponse.Up = exists
 			if exists {
-				pingResponse.UpDetails = deployment.UpResponse
+				pingResponse.UpDetails = environment.UpResponse
 			} else {
-				deployments[pingRequest.UserId] = nil
+				environment.UpRequest = nil
+				environment.UpResponse = nil
 			}
 		}
 	}
 	err = json.NewEncoder(w).Encode(&pingResponse)
 	if err != nil {
-		log.Println("Error encoding response: ", err)
+		log.Println("Error encoding ping response: ", err)
 		http.Error(w, err.Error(), 400)
 		return
 	}
@@ -109,46 +169,53 @@ func up(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	// create response
-	var upResponse *UpResponse
-	// call kubernetes
-	log.Printf("Checking if deployment exists for user '%s'...\n", upRequest.UserId)
-	exists, err := isExampleDeployed(upRequest.UserId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
-	if err != nil {
-		log.Printf("Error checking if deployment exists for user '%s': %s\n", upRequest.UserId, err)
-		http.Error(w, err.Error(), 400)
+	environment, ok := environments[upRequest.ClaimToken]
+	if ! ok {
+		log.Println("Up request failed; claim no longer valid.")
+		http.Error(w, err.Error(), 401)
 		return
-	} else if exists {
-		log.Printf("Example deployed for user '%s'.\n", upRequest.UserId)
-		deployment, ok := deployments[upRequest.UserId]
-		if ok &&  strings.EqualFold(upRequest.Repo, deployment.UpRequest.Repo) {
-			log.Println("Returning existing deployment details...")
-			upResponse = deployment.UpResponse
-		}
-	}
-	if upResponse == nil  {
-		log.Println("Creating new deployment...")
-		details, err := deployExample(upRequest.UserId, upRequest.Repo, storageDriver, examplePvTemplate, examplePvcTemplate, exampleDeploymentTemplate, exampleServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+	} else {
+		// create response
+		var upResponse *UpResponse
+		log.Printf("Checking if deployment exists for claim '%s'...\n", environment.ClaimId)
+		exists, err := isExampleDeployed(environment.ClaimId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		if err != nil {
-			log.Print("Error creating deployment: ", err)
+			log.Printf("Error checking if deployment exists for claim '%s': %s\n", environment.ClaimId, err)
 			http.Error(w, err.Error(), 400)
 			return
-		} else {
-			upResponse = &UpResponse{}
-			upResponse.Repo = upRequest.Repo
-			upResponse.DeployToBluemix = isManifestInRepo(upRequest.Repo)
-			upResponse.LogUrl = details.LogUrl
-			upResponse.EditorUrl = details.EditorUrl
-			upResponse.Tabs = details.Tabs
-			deployments[upRequest.UserId] = &Deployment{upRequest.UserId, &upRequest, upResponse}
+		} else if exists {
+			log.Printf("Example deployed for claim '%s'.\n", environment.ClaimId)
+			if environment.UpResponse != nil && environment.UpRequest != nil && strings.EqualFold(upRequest.Repo, environment.UpRequest.Repo) {
+				log.Println("Returning existing environment details...")
+				upResponse = environment.UpResponse
+			}
 		}
-	}
-	// return response
-	err = json.NewEncoder(w).Encode(upResponse)
-	if err != nil {
-		log.Print("Error encoding response: ", err)
-		http.Error(w, err.Error(), 400)
-		return
+		if upResponse == nil {
+			log.Println("Creating new deployment...")
+			details, err := deployExample(environment.ClaimId, upRequest.Repo, storageDriver, examplePvTemplate, examplePvcTemplate, exampleDeploymentTemplate, exampleServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			if err != nil {
+				log.Print("Error creating deployment: ", err)
+				http.Error(w, err.Error(), 400)
+				return
+			} else {
+				upResponse = &UpResponse{}
+				upResponse.Repo = upRequest.Repo
+				// TODO: this should be a readme instead - that way it can support anything
+				upResponse.DeployToBluemix = isManifestInRepo(upRequest.Repo)
+				upResponse.LogUrl = details.LogUrl
+				upResponse.EditorUrl = details.EditorUrl
+				upResponse.Tabs = details.Tabs
+				environment.UpRequest = &upRequest
+				environment.UpResponse = upResponse
+			}
+		}
+		// return response
+		err = json.NewEncoder(w).Encode(upResponse)
+		if err != nil {
+			log.Print("Error encoding response: ", err)
+			http.Error(w, err.Error(), 400)
+			return
+		}
 	}
 }
 
@@ -226,6 +293,7 @@ func main() {
 		storageDriver = "aufs"
 	}
 	allowOrigin = os.Getenv("MINIENV_ALLOW_ORIGIN")
+	http.HandleFunc("/api/claim", addCorsAndCacheHeadersThenServe(claim))
 	http.HandleFunc("/api/ping", addCorsAndCacheHeadersThenServe(ping))
 	http.HandleFunc("/api/up", addCorsAndCacheHeadersThenServe(up))
 	err := http.ListenAndServe(":"+os.Args[1], nil)
