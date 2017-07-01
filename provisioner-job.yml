@@ -1,0 +1,34 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: $jobName
+spec:
+  template:
+    spec:
+      containers:
+        - name: minienv-provisioner
+          image: localhost:5000/minienv/minienv-provisioner:latest
+          volumeMounts:
+            - mountPath: "/var/lib/docker"
+              name: docker-storage
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "1024Mi"
+              cpu: "1000m"
+          securityContext:
+            privileged: true
+          env:
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+          - name: MINIENV_STORAGE_DRIVER
+            value: "$storageDriver"
+      volumes:
+        - name: docker-storage
+          persistentVolumeClaim:
+            claimName: $pvcName
+      restartPolicy: Never
