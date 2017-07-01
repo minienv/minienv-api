@@ -350,5 +350,5 @@ func getExampleDeploymentName(envId string) string {
 }
 
 func getExampleAppLabel(envId string) string {
-	return strings.ToLower(fmt.Sprintf("env-%s", envId))
+	return strings.ToLower(fmt.Sprintf("env-%s-deployment", envId))
 }

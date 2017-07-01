@@ -28,6 +28,7 @@ var examplePvcTemplate string
 var exampleDeploymentTemplate string
 var exampleServiceTemplate string
 var provisionerJobTemplate string
+var provisionImages string
 var kubeServiceToken string
 var kubeServiceBaseUrl string
 var kubeNamespace string
@@ -297,19 +298,19 @@ func initEnvironments(envCount int) {
 		// check if environment running
 		deployed, err := isExampleDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		if err == nil && deployed {
-			log.Printf("Loading running environment %d...\n", environment.Id)
+			log.Printf("Loading running environment %s...\n", environment.Id)
 			environment.Status = STATUS_RUNNING
 			// TODO: environment.ClaimToken =
 			environment.LastActivity = time.Now().Unix()
 			// TODO: environment.UpRequest = ???
 			// TODO: environment.UpResponse = ???
 		} else {
-			log.Printf("Provisioning environment %d...\n", environment.Id)
+			log.Printf("Provisioning environment %s...\n", environment.Id)
 			environment.Status = STATUS_PROVISIONING
-			deployProvisioner(environment.Id, storageDriver, examplePvTemplate, examplePvcTemplate, provisionerJobTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			deployProvisioner(environment.Id, storageDriver, examplePvTemplate, examplePvcTemplate, provisionerJobTemplate, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		}
 	}
-	startEnvironmentCheckTimer()
+	checkEnvironments()
 }
 
 func startEnvironmentCheckTimer() {
@@ -317,7 +318,6 @@ func startEnvironmentCheckTimer() {
 	go func() {
 		<-timer.C
 		checkEnvironments()
-		startEnvironmentCheckTimer()
 	}()
 }
 
@@ -359,6 +359,7 @@ func checkEnvironments() {
 			}
 		}
 	}
+	startEnvironmentCheckTimer()
 }
 
 func main() {
@@ -373,6 +374,7 @@ func main() {
 	exampleDeploymentTemplate = loadFile("./example-deployment.yml")
 	exampleServiceTemplate = loadFile("./example-service.yml")
 	provisionerJobTemplate = loadFile("./provisioner-job.yml")
+	provisionImages = os.Getenv("MINIENV_PROVISION_IMAGES")
 	kubeServiceProtocol := os.Getenv("KUBERNETES_SERVICE_PROTOCOL")
 	kubeServiceHost := os.Getenv("KUBERNETES_SERVICE_HOST")
 	kubeServicePort := os.Getenv("KUBERNETES_SERVICE_PORT")

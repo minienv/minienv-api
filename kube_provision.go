@@ -7,14 +7,35 @@ import (
 )
 
 var VAR_JOB_NAME string = "$jobName"
+var VAR_PROVISON_IMAAGES string = "$provisionImages"
+
+var POD_PHASE_SUCCESS = "Succeeded"
+var POD_PHASE_FAILURE = "Failed"
 
 func isProvisionerRunning(envId string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (bool, error) {
-	name, err := getPodName(getProvisionerJobName(envId), kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+	label := getProvisionerAppLabel(envId)
+	log.Printf("Getting pod name for label '%s'...\n", label)
+	getPodsResponse, err := getPods(kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	if err != nil {
-		log.Println("Error checking provisioner status: ", err)
+		log.Println("Error getting pods.", err)
 		return false, err
 	} else {
-		return name != "", nil
+		if getPodsResponse.Items != nil && len(getPodsResponse.Items) > 0 {
+			for _, element := range getPodsResponse.Items {
+				if element.Metadata != nil && element.Metadata.Labels != nil && element.Metadata.Labels.App == label {
+					log.Printf("Pod found for label '%s'.\n", label)
+					if element.Status != nil && element.Status.Phase != "" {
+						log.Printf("Status for pod '%s' = '%s'.\n", label, element.Status.Phase)
+						running := element.Status.Phase != POD_PHASE_SUCCESS && element.Status.Phase != POD_PHASE_FAILURE
+						return running, nil
+					} else {
+						return true, nil
+					}
+				}
+			}
+		}
+		log.Printf("Pod not found for label '%s'.\n", label)
+		return false, nil
 	}
 }
 
@@ -22,7 +43,7 @@ func deleteProvisioner(envId string, kubeServiceToken string, kubeServiceBaseUrl
 	return deleteJob(getProvisionerJobName(envId), kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 }
 
-func deployProvisioner(envId string, storageDriver string, pvTemplate string, pvcTemplate string, jobTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (error) {
+func deployProvisioner(envId string, storageDriver string, pvTemplate string, pvcTemplate string, jobTemplate string, provisionImages string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (error) {
 	// delete example, if it exists
 	deleteProvisioner(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	// create persistent volume if not exits
@@ -59,9 +80,12 @@ func deployProvisioner(envId string, storageDriver string, pvTemplate string, pv
 	}
 	// create job
 	jobName := getProvisionerJobName(envId)
+	appLabel := getProvisionerAppLabel(envId)
 	job := jobTemplate
 	job = strings.Replace(job, VAR_JOB_NAME, jobName, -1)
+	job = strings.Replace(job, VAR_APP_LABEL, appLabel, -1)
 	job = strings.Replace(job, VAR_STORAGE_DRIVER, storageDriver, -1)
+	job = strings.Replace(job, VAR_PROVISON_IMAAGES, provisionImages, -1)
 	job = strings.Replace(job, VAR_PVC_NAME, pvcName, -1)
 	_, err = saveJob(job, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	if err != nil {
@@ -73,4 +97,8 @@ func deployProvisioner(envId string, storageDriver string, pvTemplate string, pv
 
 func getProvisionerJobName(envId string) string {
 	return strings.ToLower(fmt.Sprintf("env-%s-provision-job", envId))
+}
+
+func getProvisionerAppLabel(envId string) string {
+	return strings.ToLower(fmt.Sprintf("env-%s-provision", envId))
 }

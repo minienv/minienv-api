@@ -11,5 +11,7 @@ COPY --from=0 /go/bin/app /app
 COPY example-pv.yml \
      example-pvc.yml \
      example-deployment.yml \
-     example-service.yml /
+     example-service.yml \
+     provisioner-job.yml /
+
 CMD ["/app", "80"]

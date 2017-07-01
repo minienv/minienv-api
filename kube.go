@@ -86,6 +86,11 @@ type GetPodsResponse struct {
 
 type GetPodsItems struct {
 	Metadata *GetPodsItemMetadata `json:"metadata"`
+	Status *GetPodsItemStatus `json:"status"`
+}
+
+type GetPodsItemStatus struct {
+	Phase string `json:"phase"`
 }
 
 type GetPodsItemMetadata struct {

@@ -4,6 +4,9 @@ metadata:
   name: $jobName
 spec:
   template:
+    metadata:
+      labels:
+        app: $appLabel
     spec:
       containers:
         - name: minienv-provisioner
@@ -27,6 +30,8 @@ spec:
                 fieldPath: spec.nodeName
           - name: MINIENV_STORAGE_DRIVER
             value: "$storageDriver"
+          - name: MINIENV_PROVISION_IMAGES
+            value: "$provisionImages"
       volumes:
         - name: docker-storage
           persistentVolumeClaim:
