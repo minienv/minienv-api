@@ -16,7 +16,11 @@ import (
 
 var STATUS_IDLE = 0
 var STATUS_PROVISIONING = 1
-var STATUS_RUNNING = 2
+var STATUS_CLAIMED = 2
+var STATUS_RUNNING = 3
+
+var CHECK_ENV_TIMER_SECONDS = 15
+var DELETE_ENV_NO_ACIVITY_SECONDS int64 = 60
 
 var environments []*Environment
 var examplePvTemplate string
@@ -100,17 +104,18 @@ func claim(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if environment == nil {
-		// max environment exceeded - do not grant claim
+		log.Println("No more claims available.")
 		claimResponse.ClaimGranted = false
 		claimResponse.Message = "No more claims available"
 	} else {
+		log.Printf("Claimed environment %s.\n", environment.Id)
 		// ok, grant claim and create new environment
 		claimToken, _ := uuid.NewRandom()
 		claimResponse.ClaimGranted = true
 		claimResponse.ClaimToken = claimToken.String()
 		// update environment
 		environment.ClaimToken = claimResponse.ClaimToken
-		environment.Status = STATUS_RUNNING
+		environment.Status = STATUS_CLAIMED
 		environment.LastActivity = time.Now().Unix()
 	}
 	err = json.NewEncoder(w).Encode(&claimResponse)
@@ -152,7 +157,7 @@ func ping(w http.ResponseWriter, r *http.Request) {
 	} else {
 		environment.LastActivity = time.Now().Unix()
 		pingResponse.ClaimGranted = true
-		pingResponse.Up = environment.Status == STATUS_RUNNING
+		pingResponse.Up = environment.UpRequest != nil && environment.UpResponse != nil
 		if pingResponse.Up && pingRequest.GetUpDetails {
 			// make sure to check if it is really running
 			exists, err := isExampleDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
@@ -203,16 +208,15 @@ func up(w http.ResponseWriter, r *http.Request) {
 		return
 	} else {
 		// create response
-		log.Printf("ENV.STATUS=%d; ENV.CLAIM_TOKEN='%s'...\n", environment.Status, environment.ClaimToken)
 		var upResponse *UpResponse
-		log.Printf("Checking if deployment exists for env '%s'...\n", environment.Id)
+		log.Printf("Checking if deployment exists for env %s...\n", environment.Id)
 		exists, err := isExampleDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		if err != nil {
-			log.Printf("Error checking if deployment exists for env '%s': %s\n", environment.Id, err)
+			log.Printf("Error checking if deployment exists for env %s: %s\n", environment.Id, err)
 			http.Error(w, err.Error(), 400)
 			return
 		} else if exists {
-			log.Printf("Example deployed for claim '%s'.\n", environment.Id)
+			log.Printf("Example deployed for claim %s.\n", environment.Id)
 			if environment.Status == STATUS_RUNNING && strings.EqualFold(upRequest.Repo, environment.UpRequest.Repo) {
 				log.Println("Returning existing environment details...")
 				upResponse = environment.UpResponse
@@ -233,6 +237,7 @@ func up(w http.ResponseWriter, r *http.Request) {
 				upResponse.LogUrl = details.LogUrl
 				upResponse.EditorUrl = details.EditorUrl
 				upResponse.Tabs = details.Tabs
+				environment.Status = STATUS_RUNNING
 				environment.UpRequest = &upRequest
 				environment.UpResponse = upResponse
 			}
@@ -287,18 +292,19 @@ func addCorsAndCacheHeadersThenServe(handler http.HandlerFunc) http.HandlerFunc 
 func initEnvironments(envCount int) {
 	log.Printf("Provisioning %d environments...\n", envCount)
 	for i := 0; i < envCount; i++ {
-		log.Printf("Provisioning environment %d...\n", i+1)
 		environment := &Environment{Id: strconv.Itoa(i + 1)}
 		environments = append(environments, environment)
 		// check if environment running
 		deployed, err := isExampleDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		if err == nil && deployed {
+			log.Printf("Loading running environment %d...\n", environment.Id)
 			environment.Status = STATUS_RUNNING
 			// TODO: environment.ClaimToken =
 			environment.LastActivity = time.Now().Unix()
 			// TODO: environment.UpRequest = ???
 			// TODO: environment.UpResponse = ???
 		} else {
+			log.Printf("Provisioning environment %d...\n", environment.Id)
 			environment.Status = STATUS_PROVISIONING
 			deployProvisioner(environment.Id, storageDriver, examplePvTemplate, examplePvcTemplate, provisionerJobTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		}
@@ -307,7 +313,7 @@ func initEnvironments(envCount int) {
 }
 
 func startEnvironmentCheckTimer() {
-	timer := time.NewTimer(time.Second * 15)
+	timer := time.NewTimer(time.Second * time.Duration(CHECK_ENV_TIMER_SECONDS))
 	go func() {
 		<-timer.C
 		checkEnvironments()
@@ -318,7 +324,7 @@ func startEnvironmentCheckTimer() {
 func checkEnvironments() {
 	for i := 0; i < len(environments); i++ {
 		environment := environments[i]
-		log.Printf("Checking status of environment %s; status=%d\n", environment.Id, environment.Status)
+		log.Printf("Checking environment %s; current status=%d\n", environment.Id, environment.Status)
 		if environment.Status == STATUS_PROVISIONING {
 			running, err := isProvisionerRunning(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
@@ -331,10 +337,9 @@ func checkEnvironments() {
 				log.Printf("Environment %s still provisioning...\n", environment.Id)
 			}
 		} else if environment.Status == STATUS_RUNNING {
-			if time.Now().Unix() - environment.LastActivity > 30 {
+			if time.Now().Unix() - environment.LastActivity > DELETE_ENV_NO_ACIVITY_SECONDS {
 				log.Printf("Environment %s no longer active.\n", environment.Id)
 				environment.Status = STATUS_IDLE
-				environment.ClaimToken = ""
 				environment.ClaimToken = ""
 				environment.UpRequest = nil
 				environment.UpResponse = nil

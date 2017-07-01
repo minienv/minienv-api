@@ -229,6 +229,7 @@ func deployExample(envId string, gitRepo string, storageDriver string, pvTemplat
 		}
 	}
 	// create deployment
+	// TODO: Check if default ports are going to work and if not change them
 	appLabel := getExampleAppLabel(envId)
 	deploymentName := getExampleDeploymentName(envId)
 	deployment := deploymentTemplate
