@@ -39,9 +39,9 @@ type Environment struct {
 	Id string
 	Status int
 	ClaimToken string
-	UpRequest *UpRequest
-	UpResponse *UpResponse
 	LastActivity int64
+	Repo string
+	Details *EnvUpResponse
 }
 
 type ClaimRequest struct {
@@ -56,22 +56,22 @@ type ClaimResponse struct {
 
 type PingRequest struct {
 	ClaimToken string `json:"claimToken"`
-	GetUpDetails bool `json:"getUpDetails"`
+	GetEnvDetails bool `json:"getEnvDetails"`
 }
 
 type PingResponse struct {
 	ClaimGranted bool `json:"claimGranted"`
 	Up bool `json:"up"`
-	UpDetails *UpResponse `json:"upDetails"`
+	Repo string `json:"repo"`
+	EnvDetails *EnvUpResponse `json:"envDetails"`
 }
 
-type UpRequest struct {
+type EnvUpRequest struct {
 	ClaimToken string `json:"claimToken"`
 	Repo string `json:"repo"`
 }
 
-type UpResponse struct {
-	Repo string `json:"repo"`
+type EnvUpResponse struct {
 	LogUrl string `json:"logUrl"`
 	EditorUrl string `json:"editorUrl"`
 	Tabs *[]*Tab `json:"tabs"`
@@ -158,8 +158,9 @@ func ping(w http.ResponseWriter, r *http.Request) {
 	} else {
 		environment.LastActivity = time.Now().Unix()
 		pingResponse.ClaimGranted = true
-		pingResponse.Up = environment.UpRequest != nil && environment.UpResponse != nil
-		if pingResponse.Up && pingRequest.GetUpDetails {
+		pingResponse.Up = environment.Status == STATUS_RUNNING
+		pingResponse.Repo = environment.Repo;
+		if pingResponse.Up && pingRequest.GetEnvDetails {
 			// make sure to check if it is really running
 			exists, err := isExampleDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
@@ -169,10 +170,11 @@ func ping(w http.ResponseWriter, r *http.Request) {
 			}
 			pingResponse.Up = exists
 			if exists {
-				pingResponse.UpDetails = environment.UpResponse
+				pingResponse.EnvDetails = environment.Details
 			} else {
-				environment.UpRequest = nil
-				environment.UpResponse = nil
+				environment.Status = STATUS_CLAIMED
+				environment.Repo = ""
+				environment.Details = nil
 			}
 		}
 	}
@@ -190,15 +192,15 @@ func up(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// decode request
-	var upRequest UpRequest
-	err := json.NewDecoder(r.Body).Decode(&upRequest)
+	var envUpRequest EnvUpRequest
+	err := json.NewDecoder(r.Body).Decode(&envUpRequest)
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
 	var environment *Environment
 	for _, element := range environments {
-		if element.ClaimToken == upRequest.ClaimToken {
+		if element.ClaimToken == envUpRequest.ClaimToken {
 			environment = element
 			break
 		}
@@ -209,7 +211,7 @@ func up(w http.ResponseWriter, r *http.Request) {
 		return
 	} else {
 		// create response
-		var upResponse *UpResponse
+		var envUpResponse *EnvUpResponse
 		log.Printf("Checking if deployment exists for env %s...\n", environment.Id)
 		exists, err := isExampleDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		if err != nil {
@@ -218,33 +220,32 @@ func up(w http.ResponseWriter, r *http.Request) {
 			return
 		} else if exists {
 			log.Printf("Example deployed for claim %s.\n", environment.Id)
-			if environment.Status == STATUS_RUNNING && strings.EqualFold(upRequest.Repo, environment.UpRequest.Repo) {
+			if environment.Status == STATUS_RUNNING && strings.EqualFold(envUpRequest.Repo, environment.Repo) {
 				log.Println("Returning existing environment details...")
-				upResponse = environment.UpResponse
+				envUpResponse = environment.Details
 			}
 		}
-		if upResponse == nil {
+		if envUpResponse == nil {
 			log.Println("Creating new deployment...")
-			details, err := deployExample(environment.Id, upRequest.Repo, storageDriver, examplePvTemplate, examplePvcTemplate, exampleDeploymentTemplate, exampleServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			details, err := deployExample(environment.Id, envUpRequest.Repo, storageDriver, examplePvTemplate, examplePvcTemplate, exampleDeploymentTemplate, exampleServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
 				log.Print("Error creating deployment: ", err)
 				http.Error(w, err.Error(), 400)
 				return
 			} else {
-				upResponse = &UpResponse{}
-				upResponse.Repo = upRequest.Repo
+				envUpResponse = &EnvUpResponse{}
 				// TODO: this should be a readme instead - that way it can support anything
-				upResponse.DeployToBluemix = isManifestInRepo(upRequest.Repo)
-				upResponse.LogUrl = details.LogUrl
-				upResponse.EditorUrl = details.EditorUrl
-				upResponse.Tabs = details.Tabs
+				envUpResponse.DeployToBluemix = isManifestInRepo(envUpRequest.Repo)
+				envUpResponse.LogUrl = details.LogUrl
+				envUpResponse.EditorUrl = details.EditorUrl
+				envUpResponse.Tabs = details.Tabs
 				environment.Status = STATUS_RUNNING
-				environment.UpRequest = &upRequest
-				environment.UpResponse = upResponse
+				environment.Repo = envUpRequest.Repo
+				environment.Details = envUpResponse
 			}
 		}
 		// return response
-		err = json.NewEncoder(w).Encode(upResponse)
+		err = json.NewEncoder(w).Encode(envUpResponse)
 		if err != nil {
 			log.Print("Error encoding response: ", err)
 			http.Error(w, err.Error(), 400)
@@ -302,8 +303,8 @@ func initEnvironments(envCount int) {
 			environment.Status = STATUS_RUNNING
 			// TODO: environment.ClaimToken =
 			environment.LastActivity = time.Now().Unix()
-			// TODO: environment.UpRequest = ???
-			// TODO: environment.UpResponse = ???
+			// TODO: environment.Repo = ???
+			// TODO: environment.EnvUpResponse = ???
 		} else {
 			log.Printf("Provisioning environment %s...\n", environment.Id)
 			environment.Status = STATUS_PROVISIONING
@@ -341,9 +342,9 @@ func checkEnvironments() {
 				log.Printf("Environment %s no longer active.\n", environment.Id)
 				environment.Status = STATUS_IDLE
 				environment.ClaimToken = ""
-				environment.UpRequest = nil
-				environment.UpResponse = nil
 				environment.LastActivity = 0
+				environment.Repo = ""
+				environment.Details = nil
 				deleteExample(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			} else {
 				log.Printf("Checking if environment %s is still deployed...\n", environment.Id)
@@ -352,9 +353,9 @@ func checkEnvironments() {
 					log.Printf("Environment %s no longer deployed.\n", environment.Id)
 					environment.Status = STATUS_IDLE
 					environment.ClaimToken = ""
-					environment.UpRequest = nil
-					environment.UpResponse = nil
 					environment.LastActivity = 0
+					environment.Repo = ""
+					environment.Details = nil
 				}
 			}
 		}
