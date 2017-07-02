@@ -21,6 +21,7 @@ var STATUS_RUNNING = 3
 
 var CHECK_ENV_TIMER_SECONDS = 15
 var DELETE_ENV_NO_ACIVITY_SECONDS int64 = 60
+var EXPIRE_CLAIM_NO_ACIVITY_SECONDS int64 = 30
 
 var environments []*Environment
 var examplePvTemplate string
@@ -346,6 +347,10 @@ func checkEnvironments() {
 				environment.Repo = ""
 				environment.Details = nil
 				deleteExample(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+				// re-provision
+				log.Printf("Re-provisioning environment %s...\n", environment.Id)
+				environment.Status = STATUS_PROVISIONING
+				deployProvisioner(environment.Id, storageDriver, examplePvTemplate, examplePvcTemplate, provisionerJobTemplate, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			} else {
 				log.Printf("Checking if environment %s is still deployed...\n", environment.Id)
 				deployed, err := isExampleDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
@@ -357,6 +362,15 @@ func checkEnvironments() {
 					environment.Repo = ""
 					environment.Details = nil
 				}
+			}
+		}  else if environment.Status == STATUS_CLAIMED {
+			if time.Now().Unix() - environment.LastActivity > EXPIRE_CLAIM_NO_ACIVITY_SECONDS {
+				log.Printf("Environment %s claim expired.\n", environment.Id)
+				environment.Status = STATUS_IDLE
+				environment.ClaimToken = ""
+				environment.LastActivity = 0
+				environment.Repo = ""
+				environment.Details = nil
 			}
 		}
 	}

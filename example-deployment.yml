@@ -8,6 +8,8 @@ spec:
     metadata:
       labels:
         app: $appLabel
+      annotations:
+        minenv.details: "$deploymentDetails"
     spec:
       containers:
         - name: minienv

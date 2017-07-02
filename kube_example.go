@@ -20,6 +20,7 @@ var VAR_PV_PATH string = "$pvPath"
 var VAR_PVC_NAME string = "$pvcName"
 var VAR_SERVICE_NAME string = "$serviceName"
 var VAR_DEPLOYMENT_NAME string = "$deploymentName"
+var VAR_DEPLOYMENT_DETAILS string = "$deploymentDetails"
 var VAR_APP_LABEL string = "$appLabel"
 var VAR_STORAGE_DRIVER string = "$storageDriver"
 var VAR_LOG_PORT string = "$logPort"
@@ -112,8 +113,6 @@ func deployExample(envId string, gitRepo string, storageDriver string, pvTemplat
 		err = json.NewDecoder(resp.Body).Decode(&minienvConfig)
 		if err != nil {
 			log.Println("Error downloading minienv config: ", err)
-		} else {
-
 		}
 	}
 	// download docker-compose file (first try yml, then yaml)
@@ -228,12 +227,61 @@ func deployExample(envId string, gitRepo string, storageDriver string, pvTemplat
 			return nil, err
 		}
 	}
-	// create deployment
-	// TODO: Check if default ports are going to work and if not change them
+	// create the service first - we need the ports to serialize the details with the deployment
 	appLabel := getExampleAppLabel(envId)
+	serviceName := getExampleServiceName(envId)
+	service := serviceTemplate
+	service = strings.Replace(service, VAR_SERVICE_NAME, serviceName, -1)
+	service = strings.Replace(service, VAR_APP_LABEL, appLabel, -1)
+	service = strings.Replace(service, VAR_LOG_PORT, DEFAULT_LOG_PORT, -1)
+	service = strings.Replace(service, VAR_EDITOR_PORT, DEFAULT_EDITOR_PORT, -1)
+	service = strings.Replace(service, VAR_PROXY_PORT, DEFAULT_PROXY_PORT, -1)
+	serviceResp, err := saveService(service, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+	if err != nil {
+		log.Println("Error saving service: ", err)
+		return nil, err
+	}
+	// get the deployment details - we will serialize them with the deployment
+	logNodePort := 0
+	editorNodePort := 0
+	proxyNodePort := 0
+	for _, element := range serviceResp.Spec.Ports {
+		if element.Name == "log" {
+			logNodePort = element.NodePort
+		}
+		if element.Name == "editor" {
+			editorNodePort = element.NodePort
+		}
+		if element.Name == "proxy" {
+			proxyNodePort = element.NodePort
+		}
+	}
+	details := &DeploymentDetails{}
+	details.NodeHostName = os.Getenv("MINIENV_NODE_HOST_NAME") // mw:TODO
+	details.LogPort = logNodePort
+	details.LogUrl = fmt.Sprintf("http://%s:%d", details.NodeHostName, details.LogPort)
+	details.EditorPort = editorNodePort
+	details.EditorUrl = fmt.Sprintf("http://%s:%d", details.NodeHostName, details.EditorPort)
+	if minienvConfig.Editor != nil {
+		if minienvConfig.Editor.Hide {
+			details.EditorPort = 0
+			details.EditorUrl = ""
+		} else if minienvConfig.Editor.SrcDir != "" {
+			details.EditorUrl += "?src=" + url.QueryEscape(minienvConfig.Editor.SrcDir)
+		}
+	}
+	details.ProxyPort = proxyNodePort
+	for _, tab := range tabs {
+		tab.Url = fmt.Sprintf("http://%d.%s:%d%s",tab.Port,details.NodeHostName,details.ProxyPort,tab.Path)
+	}
+	details.Tabs = &tabs
+	// create the deployment
+	// TODO: Check if default ports are going to work and if not change them
 	deploymentName := getExampleDeploymentName(envId)
+	deploymentDetailsStr := deploymentDetailsToString(details)
 	deployment := deploymentTemplate
 	deployment = strings.Replace(deployment, VAR_DEPLOYMENT_NAME, deploymentName, -1)
+	deployment = strings.Replace(deployment, VAR_DEPLOYMENT_DETAILS, deploymentDetailsStr, -1)
 	deployment = strings.Replace(deployment, VAR_APP_LABEL, appLabel, -1)
 	deployment = strings.Replace(deployment, VAR_STORAGE_DRIVER, storageDriver, -1)
 	deployment = strings.Replace(deployment, VAR_LOG_PORT, DEFAULT_LOG_PORT, -1)
@@ -247,54 +295,21 @@ func deployExample(envId string, gitRepo string, storageDriver string, pvTemplat
 		log.Println("Error saving deployment: ", err)
 		return nil, err
 	}
-	// deployment created, now create the service
-	serviceName := getExampleServiceName(envId)
-	service := serviceTemplate
-	service = strings.Replace(service, VAR_SERVICE_NAME, serviceName, -1)
-	service = strings.Replace(service, VAR_APP_LABEL, appLabel, -1)
-	service = strings.Replace(service, VAR_LOG_PORT, DEFAULT_LOG_PORT, -1)
-	service = strings.Replace(service, VAR_EDITOR_PORT, DEFAULT_EDITOR_PORT, -1)
-	service = strings.Replace(service, VAR_PROXY_PORT, DEFAULT_PROXY_PORT, -1)
-	serviceResp, err := saveService(service, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+	// return
+	return details, nil
+}
+
+func deploymentDetailsToString(details *DeploymentDetails) (string) {
+	b, err := json.Marshal(details)
 	if err != nil {
-		log.Println("Error saving service: ", err)
-		return nil, err
-	} else {
-		logNodePort := 0
-		editorNodePort := 0
-		proxyNodePort := 0
-		for _, element := range serviceResp.Spec.Ports {
-			if element.Name == "log" {
-				logNodePort = element.NodePort
-			}
-			if element.Name == "editor" {
-				editorNodePort = element.NodePort
-			}
-			if element.Name == "proxy" {
-				proxyNodePort = element.NodePort
-			}
-		}
-		details := &DeploymentDetails{}
-		details.NodeHostName = os.Getenv("MINIENV_NODE_HOST_NAME") // mw:TODO
-		details.LogPort = logNodePort
-		details.LogUrl = fmt.Sprintf("http://%s:%d", details.NodeHostName, details.LogPort)
-		details.EditorPort = editorNodePort
-		details.EditorUrl = fmt.Sprintf("http://%s:%d", details.NodeHostName, details.EditorPort)
-		if minienvConfig.Editor != nil {
-			if minienvConfig.Editor.Hide {
-				details.EditorPort = 0
-				details.EditorUrl = ""
-			} else if minienvConfig.Editor.SrcDir != "" {
-				details.EditorUrl += "?src=" + url.QueryEscape(minienvConfig.Editor.SrcDir)
-			}
-		}
-		details.ProxyPort = proxyNodePort
-		for _, tab := range tabs {
-			tab.Url = fmt.Sprintf("http://%d.%s:%d%s",tab.Port,details.NodeHostName,details.ProxyPort,tab.Path)
-		}
-		details.Tabs = &tabs
-		return details, nil
+		return ""
 	}
+	s := strings.Replace(string(b), "\"", "\\\"", -1)
+	return s
+}
+
+func getExampleDeploymentDetails() (DeploymentDetails) {
+	return DeploymentDetails{}
 }
 
 func populateTabs(v interface{}, tabs *[]*Tab, parent string) {
