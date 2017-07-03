@@ -42,6 +42,25 @@ type DeleteJobResponse struct {
 
 type GetDeploymentResponse struct {
 	Kind string `json:"kind"`
+	Spec *GetDeploymentResponseSpec `json:"spec"`
+}
+
+type GetDeploymentResponseSpec struct {
+	Template *GetDeploymentResponseSpecTemplate `json:"template"`
+}
+
+type GetDeploymentResponseSpecTemplate struct {
+	Metadata *GetDeploymentSpecTemplateMetadata `json:"metadata"`
+}
+
+type GetDeploymentSpecTemplateMetadata struct {
+	Annotations *GetDeploymentSpecTemplateMetadataAnnotation `json:"annotations"`
+}
+
+type GetDeploymentSpecTemplateMetadataAnnotation struct {
+	Repo string `json:"minienv.repo"`
+	ClaimToken string `json:"minienv.claimToken"`
+	EnvDetails string `json:"minienv.envDetails"`
 }
 
 type SaveDeploymentResponse struct {
@@ -67,7 +86,7 @@ type GetReplicaSetsItemMetadata struct {
 }
 
 type GetReplicaSetsItemMetadataLabel struct {
-	App string `josn:"app"`
+	App string `json:"app"`
 }
 
 type DeleteReplicaSetBody struct {
@@ -99,7 +118,7 @@ type GetPodsItemMetadata struct {
 }
 
 type GetPodsItemMetadataLabel struct {
-	App string `josn:"app"`
+	App string `json:"app"`
 }
 
 type DeletePodResponse struct {
@@ -537,7 +556,6 @@ func waitForPodTermination(label string, kubeServiceToken string, kubeServiceBas
 	i := 0
 	for i < 6 {
 		i++
-		time.Sleep(5 *time.Second)
 		name, err := getPodName(label, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		if err != nil {
 			log.Println("Error waiting for pod termination: ", err)
@@ -545,6 +563,7 @@ func waitForPodTermination(label string, kubeServiceToken string, kubeServiceBas
 		} else if name == "" {
 			return true, nil
 		}
+		time.Sleep(5 *time.Second)
 	}
 	return false, nil
 }

@@ -24,10 +24,10 @@ var DELETE_ENV_NO_ACIVITY_SECONDS int64 = 60
 var EXPIRE_CLAIM_NO_ACIVITY_SECONDS int64 = 30
 
 var environments []*Environment
-var examplePvTemplate string
-var examplePvcTemplate string
-var exampleDeploymentTemplate string
-var exampleServiceTemplate string
+var envPvTemplate string
+var envPvcTemplate string
+var envDeploymentTemplate string
+var envServiceTemplate string
 var provisionerJobTemplate string
 var provisionImages string
 var kubeServiceToken string
@@ -163,7 +163,7 @@ func ping(w http.ResponseWriter, r *http.Request) {
 		pingResponse.Repo = environment.Repo;
 		if pingResponse.Up && pingRequest.GetEnvDetails {
 			// make sure to check if it is really running
-			exists, err := isExampleDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			exists, err := isEnvDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
 				log.Println("Error querying Kubernetes: ", err)
 				http.Error(w, err.Error(), 400)
@@ -214,13 +214,13 @@ func up(w http.ResponseWriter, r *http.Request) {
 		// create response
 		var envUpResponse *EnvUpResponse
 		log.Printf("Checking if deployment exists for env %s...\n", environment.Id)
-		exists, err := isExampleDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+		exists, err := isEnvDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		if err != nil {
 			log.Printf("Error checking if deployment exists for env %s: %s\n", environment.Id, err)
 			http.Error(w, err.Error(), 400)
 			return
 		} else if exists {
-			log.Printf("Example deployed for claim %s.\n", environment.Id)
+			log.Printf("Env deployed for claim %s.\n", environment.Id)
 			if environment.Status == STATUS_RUNNING && strings.EqualFold(envUpRequest.Repo, environment.Repo) {
 				log.Println("Returning existing environment details...")
 				envUpResponse = environment.Details
@@ -228,18 +228,13 @@ func up(w http.ResponseWriter, r *http.Request) {
 		}
 		if envUpResponse == nil {
 			log.Println("Creating new deployment...")
-			details, err := deployExample(environment.Id, envUpRequest.Repo, storageDriver, examplePvTemplate, examplePvcTemplate, exampleDeploymentTemplate, exampleServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			details, err := deployEnv(environment.Id, environment.ClaimToken, envUpRequest.Repo, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
 				log.Print("Error creating deployment: ", err)
 				http.Error(w, err.Error(), 400)
 				return
 			} else {
-				envUpResponse = &EnvUpResponse{}
-				// TODO: this should be a readme instead - that way it can support anything
-				envUpResponse.DeployToBluemix = isManifestInRepo(envUpRequest.Repo)
-				envUpResponse.LogUrl = details.LogUrl
-				envUpResponse.EditorUrl = details.EditorUrl
-				envUpResponse.Tabs = details.Tabs
+				envUpResponse = getEnvUpResponse(envUpRequest.Repo, details)
 				environment.Status = STATUS_RUNNING
 				environment.Repo = envUpRequest.Repo
 				environment.Details = envUpResponse
@@ -253,6 +248,16 @@ func up(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func getEnvUpResponse(repo string, details *DeploymentDetails) (*EnvUpResponse) {
+	envUpResponse := &EnvUpResponse{}
+	// TODO: this should be a readme instead - that way it can support anything
+	envUpResponse.DeployToBluemix = isManifestInRepo(repo)
+	envUpResponse.LogUrl = details.LogUrl
+	envUpResponse.EditorUrl = details.EditorUrl
+	envUpResponse.Tabs = details.Tabs
+	return envUpResponse
 }
 
 func isManifestInRepo(gitRepo string) (bool) {
@@ -298,18 +303,35 @@ func initEnvironments(envCount int) {
 		environment := &Environment{Id: strconv.Itoa(i + 1)}
 		environments = append(environments, environment)
 		// check if environment running
-		deployed, err := isExampleDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
-		if err == nil && deployed {
+		getDeploymentResp, err := getEnvDeployment(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+		running := false
+		if err == nil && getDeploymentResp != nil {
 			log.Printf("Loading running environment %s...\n", environment.Id)
-			environment.Status = STATUS_RUNNING
-			// TODO: environment.ClaimToken =
-			environment.LastActivity = time.Now().Unix()
-			// TODO: environment.Repo = ???
-			// TODO: environment.EnvUpResponse = ???
-		} else {
+			if getDeploymentResp.Spec != nil &&
+				getDeploymentResp.Spec.Template != nil &&
+				getDeploymentResp.Spec.Template.Metadata != nil &&
+				getDeploymentResp.Spec.Template.Metadata.Annotations != nil &&
+				getDeploymentResp.Spec.Template.Metadata.Annotations.Repo != "" &&
+				getDeploymentResp.Spec.Template.Metadata.Annotations.ClaimToken != "" &&
+				getDeploymentResp.Spec.Template.Metadata.Annotations.EnvDetails != "" {
+				log.Printf("Loading environment %s from deployment metadata.\n", environment.Id)
+				running = true
+				details  := deploymentDetailsFromString(getDeploymentResp.Spec.Template.Metadata.Annotations.EnvDetails)
+				envUpResponse := getEnvUpResponse(getDeploymentResp.Spec.Template.Metadata.Annotations.Repo, details)
+				environment.Status = STATUS_RUNNING
+				environment.ClaimToken = getDeploymentResp.Spec.Template.Metadata.Annotations.ClaimToken
+				environment.LastActivity = time.Now().Unix()
+				environment.Repo = getDeploymentResp.Spec.Template.Metadata.Annotations.Repo
+				environment.Details = envUpResponse
+			} else {
+				log.Printf("Insufficient deployment metadata for environment %s.\n", environment.Id)
+				deleteEnv(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			}
+		}
+		if ! running {
 			log.Printf("Provisioning environment %s...\n", environment.Id)
 			environment.Status = STATUS_PROVISIONING
-			deployProvisioner(environment.Id, storageDriver, examplePvTemplate, examplePvcTemplate, provisionerJobTemplate, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			deployProvisioner(environment.Id, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		}
 	}
 	checkEnvironments()
@@ -346,14 +368,14 @@ func checkEnvironments() {
 				environment.LastActivity = 0
 				environment.Repo = ""
 				environment.Details = nil
-				deleteExample(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+				deleteEnv(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 				// re-provision
 				log.Printf("Re-provisioning environment %s...\n", environment.Id)
 				environment.Status = STATUS_PROVISIONING
-				deployProvisioner(environment.Id, storageDriver, examplePvTemplate, examplePvcTemplate, provisionerJobTemplate, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+				deployProvisioner(environment.Id, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			} else {
 				log.Printf("Checking if environment %s is still deployed...\n", environment.Id)
-				deployed, err := isExampleDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+				deployed, err := isEnvDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 				if err == nil && ! deployed {
 					log.Printf("Environment %s no longer deployed.\n", environment.Id)
 					environment.Status = STATUS_IDLE
@@ -384,10 +406,10 @@ func main() {
 	if _, err := strconv.Atoi(os.Args[1]); err != nil {
 		log.Fatalf("Invalid port: %s (%s)\n", os.Args[1], err)
 	}
-	examplePvTemplate = loadFile("./example-pv.yml")
-	examplePvcTemplate = loadFile("./example-pvc.yml")
-	exampleDeploymentTemplate = loadFile("./example-deployment.yml")
-	exampleServiceTemplate = loadFile("./example-service.yml")
+	envPvTemplate = loadFile("./env-pv.yml")
+	envPvcTemplate = loadFile("./env-pvc.yml")
+	envDeploymentTemplate = loadFile("./env-deployment.yml")
+	envServiceTemplate = loadFile("./env-service.yml")
 	provisionerJobTemplate = loadFile("./provisioner-job.yml")
 	provisionImages = os.Getenv("MINIENV_PROVISION_IMAGES")
 	kubeServiceProtocol := os.Getenv("KUBERNETES_SERVICE_PROTOCOL")

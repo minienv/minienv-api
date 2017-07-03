@@ -9,7 +9,9 @@ spec:
       labels:
         app: $appLabel
       annotations:
-        minenv.details: "$deploymentDetails"
+        minienv.claimToken: "$claimToken"
+        minienv.repo: "$gitRepo"
+        minienv.envDetails: "$envDetails"
     spec:
       containers:
         - name: minienv

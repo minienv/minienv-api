@@ -20,13 +20,14 @@ var VAR_PV_PATH string = "$pvPath"
 var VAR_PVC_NAME string = "$pvcName"
 var VAR_SERVICE_NAME string = "$serviceName"
 var VAR_DEPLOYMENT_NAME string = "$deploymentName"
-var VAR_DEPLOYMENT_DETAILS string = "$deploymentDetails"
 var VAR_APP_LABEL string = "$appLabel"
+var VAR_CLAIM_TOKEN string = "$claimToken"
+var VAR_GIT_REPO string = "$gitRepo"
+var VAR_ENV_DETAILS string = "$envDetails"
 var VAR_STORAGE_DRIVER string = "$storageDriver"
 var VAR_LOG_PORT string = "$logPort"
 var VAR_EDITOR_PORT string = "$editorPort"
 var VAR_PROXY_PORT string = "$proxyPort"
-var VAR_GIT_REPO string = "$gitRepo"
 var VAR_ALLOW_ORIGIN string = "$allowOrigin"
 
 var DEFAULT_LOG_PORT string = "30081"
@@ -77,8 +78,12 @@ type DeploymentDetails struct {
 	Tabs *[]*Tab
 }
 
-func isExampleDeployed(envId string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (bool, error) {
-	getDeploymentResp, err := getDeployment(getExampleDeploymentName(envId), kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+func getEnvDeployment(envId string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*GetDeploymentResponse, error) {
+	return getDeployment(getEnvDeploymentName(envId), kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+}
+
+func isEnvDeployed(envId string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (bool, error) {
+	getDeploymentResp, err := getDeployment(getEnvDeploymentName(envId), kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	if err != nil {
 		return false, err
 	} else {
@@ -86,20 +91,20 @@ func isExampleDeployed(envId string, kubeServiceToken string, kubeServiceBaseUrl
 	}
 }
 
-func deleteExample(envId string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) {
-	log.Printf("Deleting example for env '%s'...\n", envId)
-	deploymentName := getExampleDeploymentName(envId)
-	appLabel := getExampleAppLabel(envId)
-	serviceName := getExampleServiceName(envId)
+func deleteEnv(envId string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) {
+	log.Printf("Deleting env %s...\n", envId)
+	deploymentName := getEnvDeploymentName(envId)
+	appLabel := getEnvAppLabel(envId)
+	serviceName := getEnvServiceName(envId)
 	_, _ = deleteDeployment(deploymentName, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	_, _ = deleteReplicaSet(appLabel, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	_, _ = deleteService(serviceName, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	_, _ = waitForPodTermination(appLabel, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 }
 
-func deployExample(envId string, gitRepo string, storageDriver string, pvTemplate string, pvcTemplate string, deploymentTemplate string, serviceTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*DeploymentDetails, error) {
-	// delete example, if it exists
-	deleteExample(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+func deployEnv(envId string, claimToken string, gitRepo string, storageDriver string, pvTemplate string, pvcTemplate string, deploymentTemplate string, serviceTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*DeploymentDetails, error) {
+	// delete env, if it exists
+	deleteEnv(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	// download minienv.json
 	var minienvConfig MinienvConfig
 	minienvConfigUrl := fmt.Sprintf("%s/raw/master/minienv.json", gitRepo)
@@ -228,8 +233,8 @@ func deployExample(envId string, gitRepo string, storageDriver string, pvTemplat
 		}
 	}
 	// create the service first - we need the ports to serialize the details with the deployment
-	appLabel := getExampleAppLabel(envId)
-	serviceName := getExampleServiceName(envId)
+	appLabel := getEnvAppLabel(envId)
+	serviceName := getEnvServiceName(envId)
 	service := serviceTemplate
 	service = strings.Replace(service, VAR_SERVICE_NAME, serviceName, -1)
 	service = strings.Replace(service, VAR_APP_LABEL, appLabel, -1)
@@ -277,17 +282,18 @@ func deployExample(envId string, gitRepo string, storageDriver string, pvTemplat
 	details.Tabs = &tabs
 	// create the deployment
 	// TODO: Check if default ports are going to work and if not change them
-	deploymentName := getExampleDeploymentName(envId)
+	deploymentName := getEnvDeploymentName(envId)
 	deploymentDetailsStr := deploymentDetailsToString(details)
 	deployment := deploymentTemplate
 	deployment = strings.Replace(deployment, VAR_DEPLOYMENT_NAME, deploymentName, -1)
-	deployment = strings.Replace(deployment, VAR_DEPLOYMENT_DETAILS, deploymentDetailsStr, -1)
 	deployment = strings.Replace(deployment, VAR_APP_LABEL, appLabel, -1)
+	deployment = strings.Replace(deployment, VAR_CLAIM_TOKEN, claimToken, -1)
+	deployment = strings.Replace(deployment, VAR_GIT_REPO, gitRepo, -1)
+	deployment = strings.Replace(deployment, VAR_ENV_DETAILS, deploymentDetailsStr, -1)
 	deployment = strings.Replace(deployment, VAR_STORAGE_DRIVER, storageDriver, -1)
 	deployment = strings.Replace(deployment, VAR_LOG_PORT, DEFAULT_LOG_PORT, -1)
 	deployment = strings.Replace(deployment, VAR_EDITOR_PORT, DEFAULT_EDITOR_PORT, -1)
 	deployment = strings.Replace(deployment, VAR_PROXY_PORT, DEFAULT_PROXY_PORT, -1)
-	deployment = strings.Replace(deployment, VAR_GIT_REPO, gitRepo, -1)
 	deployment = strings.Replace(deployment, VAR_ALLOW_ORIGIN, allowOrigin, -1)
 	deployment = strings.Replace(deployment, VAR_PVC_NAME, pvcName, -1)
 	_, err = saveDeployment(deployment, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
@@ -308,8 +314,15 @@ func deploymentDetailsToString(details *DeploymentDetails) (string) {
 	return s
 }
 
-func getExampleDeploymentDetails() (DeploymentDetails) {
-	return DeploymentDetails{}
+func deploymentDetailsFromString(envDetails string) (*DeploymentDetails) {
+	envDetails = strings.Replace(envDetails, "\\\"", "\"", -1)
+	var deploymentDetails DeploymentDetails
+	err := json.Unmarshal([]byte(envDetails), &deploymentDetails)
+	if err != nil {
+		return nil
+	} else {
+		return &deploymentDetails
+	}
 }
 
 func populateTabs(v interface{}, tabs *[]*Tab, parent string) {
@@ -356,14 +369,14 @@ func getPersistentVolumeClaimName(envId string) string {
 	return strings.ToLower(fmt.Sprintf("env-%s-pvc", envId))
 }
 
-func getExampleServiceName(envId string) string {
+func getEnvServiceName(envId string) string {
 	return strings.ToLower(fmt.Sprintf("env-%s-service", envId))
 }
 
-func getExampleDeploymentName(envId string) string {
+func getEnvDeploymentName(envId string) string {
 	return strings.ToLower(fmt.Sprintf("env-%s-deployment", envId))
 }
 
-func getExampleAppLabel(envId string) string {
+func getEnvAppLabel(envId string) string {
 	return strings.ToLower(fmt.Sprintf("env-%s-deployment", envId))
 }

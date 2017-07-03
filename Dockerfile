@@ -8,10 +8,10 @@ RUN go get -v -d \
 
 FROM alpine:latest
 COPY --from=0 /go/bin/app /app
-COPY example-pv.yml \
-     example-pvc.yml \
-     example-deployment.yml \
-     example-service.yml \
+COPY env-pv.yml \
+     env-pvc.yml \
+     env-deployment.yml \
+     env-service.yml \
      provisioner-job.yml /
 
 CMD ["/app", "80"]
