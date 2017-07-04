@@ -359,11 +359,11 @@ func populateTabsSlice(slc []interface{}, tabs *[]*Tab, parent string) {
 }
 
 func getPersistentVolumeName(envId string) string {
-	return strings.ToLower(fmt.Sprintf("env-%s-pv", envId))
+	return strings.ToLower(fmt.Sprintf("minienv-env-%s-pv", envId))
 }
 
 func getPersistentVolumePath(envId string) string {
-	return strings.ToLower(fmt.Sprintf("/env-%s-docker", envId))
+	return strings.ToLower(fmt.Sprintf("/minienv-env-%s", envId))
 }
 
 func getPersistentVolumeClaimName(envId string) string {

@@ -107,9 +107,9 @@ func claim(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if environment == nil {
-		log.Println("No more claims available.")
+		log.Println("Claim failed; no environments available.")
 		claimResponse.ClaimGranted = false
-		claimResponse.Message = "No more claims available"
+		claimResponse.Message = "No environments available"
 	} else {
 		log.Printf("Claimed environment %s.\n", environment.Id)
 		// ok, grant claim and create new environment
