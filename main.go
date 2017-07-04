@@ -29,6 +29,7 @@ var envPvcTemplate string
 var envDeploymentTemplate string
 var envServiceTemplate string
 var provisionerJobTemplate string
+var provisionVolumeSize string
 var provisionImages string
 var kubeServiceToken string
 var kubeServiceBaseUrl string
@@ -331,7 +332,24 @@ func initEnvironments(envCount int) {
 		if ! running {
 			log.Printf("Provisioning environment %s...\n", environment.Id)
 			environment.Status = STATUS_PROVISIONING
-			deployProvisioner(environment.Id, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			deployProvisioner(environment.Id, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionVolumeSize, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+		}
+	}
+	// scale down, if necessary
+	i := envCount
+	for true {
+		envId := strconv.Itoa(i + 1)
+		pvName := getPersistentVolumeName(envId)
+		response, _ := getPersistentVolume(pvName, kubeServiceToken, kubeServiceBaseUrl)
+		if response != nil {
+			log.Printf("De-provisioning environment %s...\n", envId)
+			deleteEnv(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			deleteProvisioner(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			deletePersistentVolumeClaim(getPersistentVolumeClaimName(envId), kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			deletePersistentVolume(pvName, kubeServiceToken, kubeServiceBaseUrl)
+			i++
+		} else {
+			break
 		}
 	}
 	checkEnvironments()
@@ -372,7 +390,7 @@ func checkEnvironments() {
 				// re-provision
 				log.Printf("Re-provisioning environment %s...\n", environment.Id)
 				environment.Status = STATUS_PROVISIONING
-				deployProvisioner(environment.Id, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+				deployProvisioner(environment.Id, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionVolumeSize, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			} else {
 				log.Printf("Checking if environment %s is still deployed...\n", environment.Id)
 				deployed, err := isEnvDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
@@ -411,6 +429,7 @@ func main() {
 	envDeploymentTemplate = loadFile("./env-deployment.yml")
 	envServiceTemplate = loadFile("./env-service.yml")
 	provisionerJobTemplate = loadFile("./provisioner-job.yml")
+	provisionVolumeSize = os.Getenv("MINIENV_PROVISION_VOLUME_SIZE")
 	provisionImages = os.Getenv("MINIENV_PROVISION_IMAGES")
 	kubeServiceProtocol := os.Getenv("KUBERNETES_SERVICE_PROTOCOL")
 	kubeServiceHost := os.Getenv("KUBERNETES_SERVICE_HOST")

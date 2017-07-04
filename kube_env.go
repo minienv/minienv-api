@@ -16,6 +16,7 @@ import (
 )
 
 var VAR_PV_NAME string = "$pvName"
+var VAR_PV_SIZE string = "$pvSize"
 var VAR_PV_PATH string = "$pvPath"
 var VAR_PVC_NAME string = "$pvcName"
 var VAR_SERVICE_NAME string = "$serviceName"

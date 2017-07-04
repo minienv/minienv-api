@@ -12,6 +12,11 @@ import (
 	"time"
 )
 
+type StatusResponse struct {
+	Kind string `json:"kind"`
+	Status string `json:"status"`
+}
+
 type GetPersistentVolumeResponse struct {
 	Kind string `json:"kind"`
 }
@@ -20,12 +25,20 @@ type SavePersistentVolumeResponse struct {
 	Kind string `json:"kind"`
 }
 
+type DeletePersistentVolumeResponse struct {
+	StatusResponse
+}
+
 type GetPersistentVolumeClaimResponse struct {
 	Kind string `json:"kind"`
 }
 
 type SavePersistentVolumeClaimResponse struct {
 	Kind string `json:"kind"`
+}
+
+type DeletePersistentVolumeClaimResponse struct {
+	StatusResponse
 }
 
 type GetJobResponse struct {
@@ -37,7 +50,7 @@ type SaveJobResponse struct {
 }
 
 type DeleteJobResponse struct {
-	Kind string `json:"kind"`
+	StatusResponse
 }
 
 type GetDeploymentResponse struct {
@@ -68,7 +81,7 @@ type SaveDeploymentResponse struct {
 }
 
 type DeleteDeploymentResponse struct {
-	Kind string `json:"kind"`
+	StatusResponse
 }
 
 type GetReplicaSetsResponse struct {
@@ -95,7 +108,7 @@ type DeleteReplicaSetBody struct {
 }
 
 type DeleteReplicaSetResponse struct {
-	Kind string `json:"kind"`
+	StatusResponse
 }
 
 type GetPodsResponse struct {
@@ -122,7 +135,7 @@ type GetPodsItemMetadataLabel struct {
 }
 
 type DeletePodResponse struct {
-	Kind string `json:"kind"`
+	StatusResponse
 }
 
 type GetServiceResponse struct {
@@ -144,7 +157,7 @@ type ServiceSpecPort struct {
 }
 
 type DeleteServiceResponse struct {
-	Kind string `json:"kind"`
+	StatusResponse
 }
 
 func getHttpClient() *http.Client {
@@ -205,6 +218,28 @@ func savePersistentVolume(yaml string, kubeServiceToken string, kubeServiceBaseU
 	}
 }
 
+func deletePersistentVolume(name string, kubeServiceToken string, kubeServiceBaseUrl string) (bool, error) {
+	url := fmt.Sprintf("%s/api/v1/persistentvolumes/%s", kubeServiceBaseUrl, name)
+	client := getHttpClient()
+	req, err := http.NewRequest("DELETE", url, nil)
+	if len(kubeServiceToken) > 0 {
+		req.Header.Add("Authorization", "Bearer " + kubeServiceToken)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Println("Error deleting persistent volume: ", err)
+		return false, err
+	} else {
+		var deletePersistentVolumeResp DeletePersistentVolumeResponse
+		err := json.NewDecoder(resp.Body).Decode(&deletePersistentVolumeResp)
+		if err != nil {
+			return false, err
+		} else {
+			return deletePersistentVolumeResp.Status == "Success", nil
+		}
+	}
+}
+
 func getPersistentVolumeClaim(name string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*GetPersistentVolumeClaimResponse, error) {
 	url := fmt.Sprintf("%s/api/v1/namespaces/%s/persistentvolumeclaims/%s", kubeServiceBaseUrl, kubeNamespace, name)
 	client := getHttpClient()
@@ -250,6 +285,28 @@ func savePersistentVolumeClaim(yaml string, kubeServiceToken string, kubeService
 			return nil, errors.New("Unable to create persistent volume claim")
 		} else {
 			return &savePersistentVolumeClaimResp, nil
+		}
+	}
+}
+
+func deletePersistentVolumeClaim(name string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (bool, error) {
+	url := fmt.Sprintf("%s/api/v1/namespaces/%s/persistentvolumeclaims/%s", kubeServiceBaseUrl, kubeNamespace, name)
+	client := getHttpClient()
+	req, err := http.NewRequest("DELETE", url, nil)
+	if len(kubeServiceToken) > 0 {
+		req.Header.Add("Authorization", "Bearer " + kubeServiceToken)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Println("Error deleting persistent volume claim: ", err)
+		return false, err
+	} else {
+		var deletePersistentVolumeClaimResp DeletePersistentVolumeClaimResponse
+		err := json.NewDecoder(resp.Body).Decode(&deletePersistentVolumeClaimResp)
+		if err != nil {
+			return false, err
+		} else {
+			return deletePersistentVolumeClaimResp.Status == "Success", nil
 		}
 	}
 }
@@ -321,11 +378,10 @@ func deleteJob(name string, kubeServiceToken string, kubeServiceBaseUrl string, 
 		if err != nil {
 			return false, err
 		} else {
-			return deleteJobResp.Kind == "Job", nil
+			return deleteJobResp.Status == "Success", nil
 		}
 	}
 }
-
 
 func getDeployment(name string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*GetDeploymentResponse, error) {
 	url := fmt.Sprintf("%s/apis/extensions/v1beta1/namespaces/%s/deployments/%s", kubeServiceBaseUrl, kubeNamespace, name)
@@ -394,7 +450,7 @@ func deleteDeployment(name string, kubeServiceToken string, kubeServiceBaseUrl s
 		if err != nil {
 			return false, err
 		} else {
-			return deleteDeploymentResp.Kind == "Deployment", nil
+			return deleteDeploymentResp.Status == "Success", nil
 		}
 	}
 }
@@ -472,7 +528,7 @@ func deleteReplicaSet(label string, kubeServiceToken string, kubeServiceBaseUrl 
 		if err != nil {
 			return false, err
 		} else {
-			return deleteReplicaSetResp.Kind == "ReplicaSet", nil
+			return deleteReplicaSetResp.Status == "Success", nil
 		}
 	}
 }
@@ -519,15 +575,7 @@ func getPodName(label string, kubeServiceToken string, kubeServiceBaseUrl string
 	}
 }
 
-func deletePod(label string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (bool, error) {
-	log.Printf("Deleting pod for label '%s'...\n", label)
-	name, err := getPodName(label, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
-	if err != nil {
-		log.Println("Error deleting pod: ", err)
-		return false, err
-	} else if name == "" {
-		return false, nil
-	}
+func deletePod(name string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (bool, error) {
 	// delete pod
 	log.Printf("Deleting pod '%s'...\n", name)
 	url := fmt.Sprintf("%s/api/v1/namespaces/%s/pods/%s", kubeServiceBaseUrl, kubeNamespace, name)
@@ -546,7 +594,7 @@ func deletePod(label string, kubeServiceToken string, kubeServiceBaseUrl string,
 		if err != nil {
 			return false, err
 		} else {
-			return deletePodResp.Kind == "Pod", nil
+			return deletePodResp.Status == "Success", nil
 		}
 	}
 }
@@ -635,7 +683,7 @@ func deleteService(name string, kubeServiceToken string, kubeServiceBaseUrl stri
 		if err != nil {
 			return false, err
 		} else {
-			return deleteServiceResp.Kind == "Service", nil
+			return deleteServiceResp.Status == "Success", nil
 		}
 	}
 }
