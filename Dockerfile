@@ -7,6 +7,7 @@ RUN go get -v -d \
   && CGO_ENABLED=0 GOOS=linux go install -a -installsuffix cgo app
 
 FROM alpine:latest
+MAINTAINER Mark Watson <markwatsonatx@gmail.com>
 COPY --from=0 /go/bin/app /app
 COPY env-pv.yml \
      env-pvc.yml \

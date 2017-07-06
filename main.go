@@ -229,6 +229,8 @@ func up(w http.ResponseWriter, r *http.Request) {
 		}
 		if envUpResponse == nil {
 			log.Println("Creating new deployment...")
+			// change status to claimed, so the scheduler doesn't think it has stopped when the old repo is shutdown
+			environment.Status = STATUS_CLAIMED
 			details, err := deployEnv(environment.Id, environment.ClaimToken, envUpRequest.Repo, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
 				log.Print("Error creating deployment: ", err)
