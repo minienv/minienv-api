@@ -14,5 +14,4 @@ COPY env-pv.yml \
      env-deployment.yml \
      env-service.yml \
      provisioner-job.yml /
-
 CMD ["/app", "80"]
