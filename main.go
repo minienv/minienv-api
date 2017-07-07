@@ -36,6 +36,7 @@ var kubeServiceBaseUrl string
 var kubeNamespace string
 var storageDriver string
 var allowOrigin string
+var whitelistRepos []string
 
 type Environment struct {
 	Id string
@@ -54,6 +55,10 @@ type ClaimResponse struct {
 	ClaimGranted bool `json:"claimGranted"`
 	ClaimToken string `json:"claimToken"`
 	Message string `json:"message"`
+}
+
+type WhitelistResponse struct {
+	Repos []string `json:"repos"`
 }
 
 type PingRequest struct {
@@ -124,6 +129,20 @@ func claim(w http.ResponseWriter, r *http.Request) {
 	err = json.NewEncoder(w).Encode(&claimResponse)
 	if err != nil {
 		log.Println("Error encoding claim response: ", err)
+		http.Error(w, err.Error(), 400)
+		return
+	}
+}
+
+func whitelist(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Invalid whitelist request", 400)
+	}
+	var whitelistResponse = WhitelistResponse{}
+	whitelistResponse.Repos = whitelistRepos
+	err := json.NewEncoder(w).Encode(&whitelistResponse)
+	if err != nil {
+		log.Println("Error encoding ping response: ", err)
 		http.Error(w, err.Error(), 400)
 		return
 	}
@@ -463,10 +482,20 @@ func main() {
 	if i, err := strconv.Atoi(os.Getenv("MINIENV_PROVISION_COUNT")); err == nil {
 		envCount = i
 	}
+	whitelistReposStr := os.Getenv("MINIENV_REPO_WHITELIST")
+	if whitelistReposStr == "" {
+		whitelistRepos = nil
+	} else {
+		whitelistRepos = strings.Split(whitelistReposStr, ",")
+		if len(whitelistRepos) <= 0 {
+			whitelistRepos = nil
+		}
+	}
 	initEnvironments(envCount)
 	http.HandleFunc("/api/claim", addCorsAndCacheHeadersThenServe(claim))
 	http.HandleFunc("/api/ping", addCorsAndCacheHeadersThenServe(ping))
 	http.HandleFunc("/api/up", addCorsAndCacheHeadersThenServe(up))
+	http.HandleFunc("/api/whitelist", addCorsAndCacheHeadersThenServe(whitelist))
 	err := http.ListenAndServe(":"+os.Args[1], nil)
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
