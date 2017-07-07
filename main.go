@@ -231,6 +231,20 @@ func up(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid claim token", 401)
 		return
 	} else {
+		if whitelistRepos != nil {
+			repoWhitelisted := false
+			for _, element := range whitelistRepos {
+				if envUpRequest.Repo == element {
+					repoWhitelisted = true
+					break
+				}
+			}
+			if ! repoWhitelisted {
+				log.Println("Up request failed; repo not whitelisted.")
+				http.Error(w, "Invalid repo", 401)
+				return
+			}
+		}
 		// create response
 		var envUpResponse *EnvUpResponse
 		log.Printf("Checking if deployment exists for env %s...\n", environment.Id)
