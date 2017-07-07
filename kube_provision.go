@@ -103,6 +103,7 @@ func deployProvisioner(envId string, storageDriver string, pvTemplate string, pv
 	jobName := getProvisionerJobName(envId)
 	appLabel := getProvisionerAppLabel(envId)
 	job := jobTemplate
+	job = strings.Replace(job, VAR_MINIENV_VERSION, MINIENV_VERSION, -1)
 	job = strings.Replace(job, VAR_JOB_NAME, jobName, -1)
 	job = strings.Replace(job, VAR_APP_LABEL, appLabel, -1)
 	job = strings.Replace(job, VAR_STORAGE_DRIVER, storageDriver, -1)

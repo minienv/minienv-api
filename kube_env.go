@@ -15,6 +15,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+var VAR_MINIENV_VERSION string = "$minienvVersion"
 var VAR_PV_NAME string = "$pvName"
 var VAR_PV_SIZE string = "$pvSize"
 var VAR_PV_PATH string = "$pvPath"
@@ -286,6 +287,7 @@ func deployEnv(envId string, claimToken string, gitRepo string, storageDriver st
 	deploymentName := getEnvDeploymentName(envId)
 	deploymentDetailsStr := deploymentDetailsToString(details)
 	deployment := deploymentTemplate
+	deployment = strings.Replace(deployment, VAR_MINIENV_VERSION, MINIENV_VERSION, -1)
 	deployment = strings.Replace(deployment, VAR_DEPLOYMENT_NAME, deploymentName, -1)
 	deployment = strings.Replace(deployment, VAR_APP_LABEL, appLabel, -1)
 	deployment = strings.Replace(deployment, VAR_CLAIM_TOKEN, claimToken, -1)

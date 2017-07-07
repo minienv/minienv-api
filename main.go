@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 )
 
+var MINIENV_VERSION = "latest"
+
 var STATUS_IDLE = 0
 var STATUS_PROVISIONING = 1
 var STATUS_CLAIMED = 2

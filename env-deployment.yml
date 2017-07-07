@@ -33,6 +33,8 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: spec.nodeName
+          - name: MINIENV_VERSION
+            value: "$minienvVersion"
           - name: MINIENV_ALLOW_ORIGIN
             value: "$allowOrigin"
           - name: MINIENV_STORAGE_DRIVER
