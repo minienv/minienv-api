@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: $pvName
+spec:
+  accessModes:
+    - ReadWriteOnce
+  capacity:
+    storage: $pvSize
+  hostPath:
+    path: "$pvPath"

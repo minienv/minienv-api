@@ -9,8 +9,9 @@ RUN go get -v -d \
 FROM alpine:latest
 MAINTAINER Mark Watson <markwatsonatx@gmail.com>
 COPY --from=0 /go/bin/app /app
-COPY env-pv.yml \
-     env-pvc.yml \
+COPY env-pv-host-path.yml \
+     env-pvc-host-path.yml \
+     env-pvc-storage-class.yml \
      env-deployment.yml \
      env-service.yml \
      provisioner-job.yml /

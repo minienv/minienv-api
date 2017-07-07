@@ -2,6 +2,8 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: $pvcName
+  annotations:
+    volume.beta.kubernetes.io/storage-class: "$pvcStorageClass"
 spec:
   accessModes:
     - ReadWriteOnce

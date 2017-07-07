@@ -26,8 +26,10 @@ var DELETE_ENV_NO_ACIVITY_SECONDS int64 = 60
 var EXPIRE_CLAIM_NO_ACIVITY_SECONDS int64 = 30
 
 var environments []*Environment
+var envPvHostPath bool
 var envPvTemplate string
 var envPvcTemplate string
+var envPvcStorageClass string
 var envDeploymentTemplate string
 var envServiceTemplate string
 var provisionerJobTemplate string
@@ -376,14 +378,17 @@ func initEnvironments(envCount int) {
 	i := envCount
 	for true {
 		envId := strconv.Itoa(i + 1)
-		pvName := getPersistentVolumeName(envId)
-		response, _ := getPersistentVolume(pvName, kubeServiceToken, kubeServiceBaseUrl)
+		pvcName := getPersistentVolumeClaimName(envId)
+		response, _ := getPersistentVolumeClaim(pvcName, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		if response != nil {
 			log.Printf("De-provisioning environment %s...\n", envId)
 			deleteEnv(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			deleteProvisioner(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
-			deletePersistentVolumeClaim(getPersistentVolumeClaimName(envId), kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
-			deletePersistentVolume(pvName, kubeServiceToken, kubeServiceBaseUrl)
+			deletePersistentVolumeClaim(pvcName, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			if envPvHostPath {
+				pvName := getPersistentVolumeName(envId)
+				deletePersistentVolume(pvName, kubeServiceToken, kubeServiceBaseUrl)
+			}
 			i++
 		} else {
 			break
@@ -461,8 +466,16 @@ func main() {
 	if _, err := strconv.Atoi(os.Args[1]); err != nil {
 		log.Fatalf("Invalid port: %s (%s)\n", os.Args[1], err)
 	}
-	envPvTemplate = loadFile("./env-pv.yml")
-	envPvcTemplate = loadFile("./env-pvc.yml")
+	envPvcStorageClass = os.Getenv("MINIENV_VOLUME_STORAGE_CLASS")
+	if envPvcStorageClass == "" {
+		envPvHostPath = true
+		envPvTemplate = loadFile("./env-pv-host-path.yml")
+		envPvcTemplate = loadFile("./env-pvc-host-path.yml")
+
+	} else {
+		envPvHostPath = false
+		envPvcTemplate = loadFile("./env-pvc-storage-class.yml")
+	}
 	envDeploymentTemplate = loadFile("./env-deployment.yml")
 	envServiceTemplate = loadFile("./env-service.yml")
 	provisionerJobTemplate = loadFile("./provisioner-job.yml")

@@ -65,34 +65,37 @@ func deleteProvisioner(envId string, kubeServiceToken string, kubeServiceBaseUrl
 func deployProvisioner(envId string, storageDriver string, pvTemplate string, pvcTemplate string, jobTemplate string, provisionVolumeSize string, provisionImages string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (error) {
 	// delete example, if it exists
 	deleteProvisioner(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
-	// create persistent volume if not exits
-	pvName := getPersistentVolumeName(envId)
-	pvPath := getPersistentVolumePath(envId)
-	pvResponse, err := getPersistentVolume(pvName, kubeServiceToken, kubeServiceBaseUrl)
-	if err != nil {
-		log.Println("Error saving persistent volume: ", err)
-		return err
-	} else if pvResponse == nil {
-		pv := pvTemplate
-		pv = strings.Replace(pv, VAR_PV_NAME, pvName, -1)
-		pv = strings.Replace(pv, VAR_PV_SIZE, provisionVolumeSize, -1)
-		pv = strings.Replace(pv, VAR_PV_PATH, pvPath, -1)
-		_, err = savePersistentVolume(pv, kubeServiceToken, kubeServiceBaseUrl)
+	// create persistent volume if using host paths
+	if envPvHostPath {
+		pvName := getPersistentVolumeName(envId)
+		pvPath := getPersistentVolumePath(envId)
+		pvResponse, err := getPersistentVolume(pvName, kubeServiceToken, kubeServiceBaseUrl)
 		if err != nil {
-			log.Println("Error saving persistent volume: ", err)
+			log.Println("Error getting persistent volume: ", err)
 			return err
+		} else if pvResponse == nil {
+			pv := pvTemplate
+			pv = strings.Replace(pv, VAR_PV_NAME, pvName, -1)
+			pv = strings.Replace(pv, VAR_PV_SIZE, provisionVolumeSize, -1)
+			pv = strings.Replace(pv, VAR_PV_PATH, pvPath, -1)
+			_, err = savePersistentVolume(pv, kubeServiceToken, kubeServiceBaseUrl)
+			if err != nil {
+				log.Println("Error saving persistent volume: ", err)
+				return err
+			}
 		}
 	}
 	// create persistent volume claim, if not exists
 	pvcName := getPersistentVolumeClaimName(envId)
 	pvcResponse, err := getPersistentVolumeClaim(pvcName, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	if err != nil {
-		log.Println("Error saving persistent volume claim: ", err)
+		log.Println("Error getting persistent volume claim: ", err)
 		return err
 	} else if pvcResponse == nil {
 		pvc := pvcTemplate
-		pvc = strings.Replace(pvc, VAR_PVC_NAME, pvcName, -1)
 		pvc = strings.Replace(pvc, VAR_PV_SIZE, provisionVolumeSize, -1)
+		pvc = strings.Replace(pvc, VAR_PVC_NAME, pvcName, -1)
+		pvc = strings.Replace(pvc, VAR_PVC_STORAGE_CLASS, envPvcStorageClass, -1)
 		_, err = savePersistentVolumeClaim(pvc, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		if err != nil {
 			log.Println("Error saving persistent volume claim: ", err)
