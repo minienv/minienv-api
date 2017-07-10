@@ -38,6 +38,7 @@ var provisionImages string
 var kubeServiceToken string
 var kubeServiceBaseUrl string
 var kubeNamespace string
+var nodeNameOverride string
 var storageDriver string
 var allowOrigin string
 var whitelistRepos []string
@@ -268,7 +269,7 @@ func up(w http.ResponseWriter, r *http.Request) {
 			log.Println("Creating new deployment...")
 			// change status to claimed, so the scheduler doesn't think it has stopped when the old repo is shutdown
 			environment.Status = STATUS_CLAIMED
-			details, err := deployEnv(environment.Id, environment.ClaimToken, envUpRequest.Repo, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			details, err := deployEnv(environment.Id, environment.ClaimToken, nodeNameOverride, envUpRequest.Repo, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
 				log.Print("Error creating deployment: ", err)
 				http.Error(w, err.Error(), 400)
@@ -371,7 +372,7 @@ func initEnvironments(envCount int) {
 		if ! running {
 			log.Printf("Provisioning environment %s...\n", environment.Id)
 			environment.Status = STATUS_PROVISIONING
-			deployProvisioner(environment.Id, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionVolumeSize, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			deployProvisioner(environment.Id, nodeNameOverride, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionVolumeSize, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		}
 	}
 	// scale down, if necessary
@@ -432,7 +433,7 @@ func checkEnvironments() {
 				// re-provision
 				log.Printf("Re-provisioning environment %s...\n", environment.Id)
 				environment.Status = STATUS_PROVISIONING
-				deployProvisioner(environment.Id, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionVolumeSize, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+				deployProvisioner(environment.Id, nodeNameOverride, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionVolumeSize, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			} else {
 				log.Printf("Checking if environment %s is still deployed...\n", environment.Id)
 				deployed, err := isEnvDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
@@ -502,6 +503,7 @@ func main() {
 	if kubeNamespace == "" {
 		kubeNamespace = "default"
 	}
+	nodeNameOverride = os.Getenv("MINIENV_NODE_NAME_OVERRIDE")
 	storageDriver = os.Getenv("MINIENV_STORAGE_DRIVER")
 	if storageDriver == "" {
 		storageDriver = "aufs"
