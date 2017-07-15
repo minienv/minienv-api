@@ -7,7 +7,7 @@ import (
 )
 
 var VAR_JOB_NAME string = "$jobName"
-var VAR_PROVISON_IMAAGES string = "$provisionImages"
+var VAR_PROVISON_IMAGES string = "$provisionImages"
 
 var POD_PHASE_SUCCESS = "Succeeded"
 var POD_PHASE_FAILURE = "Failed"
@@ -111,7 +111,7 @@ func deployProvisioner(envId string, nodeNameOverride string, storageDriver stri
 	job = strings.Replace(job, VAR_JOB_NAME, jobName, -1)
 	job = strings.Replace(job, VAR_APP_LABEL, appLabel, -1)
 	job = strings.Replace(job, VAR_STORAGE_DRIVER, storageDriver, -1)
-	job = strings.Replace(job, VAR_PROVISON_IMAAGES, provisionImages, -1)
+	job = strings.Replace(job, VAR_PROVISON_IMAGES, provisionImages, -1)
 	job = strings.Replace(job, VAR_PVC_NAME, pvcName, -1)
 	_, err = saveJob(job, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	if err != nil {

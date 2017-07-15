@@ -10,7 +10,7 @@ spec:
     spec:
       containers:
         - name: minienv-provisioner
-          image: localhost:5000/minienv/minienv-provisioner:latest
+          image: localhost:5000/minienv/minienv-provisioner:$minienvVersion
           volumeMounts:
             - mountPath: "/var/lib/docker"
               name: docker-storage
