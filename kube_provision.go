@@ -62,7 +62,7 @@ func deleteProvisioner(envId string, kubeServiceToken string, kubeServiceBaseUrl
 	return deleted, err
 }
 
-func deployProvisioner(envId string, nodeNameOverride string, storageDriver string, pvTemplate string, pvcTemplate string, jobTemplate string, provisionVolumeSize string, provisionImages string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (error) {
+func deployProvisioner(minienvVersion string, envId string, nodeNameOverride string, storageDriver string, pvTemplate string, pvcTemplate string, jobTemplate string, provisionVolumeSize string, provisionImages string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (error) {
 	// delete example, if it exists
 	deleteProvisioner(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	// create persistent volume if using host paths
@@ -107,7 +107,7 @@ func deployProvisioner(envId string, nodeNameOverride string, storageDriver stri
 	appLabel := getProvisionerAppLabel(envId)
 	job := jobTemplate
 	job = strings.Replace(job, VAR_MINIENV_NODE_NAME_OVERRIDE, nodeNameOverride, -1)
-	job = strings.Replace(job, VAR_MINIENV_VERSION, MINIENV_VERSION, -1)
+	job = strings.Replace(job, VAR_MINIENV_VERSION, minienvVersion, -1)
 	job = strings.Replace(job, VAR_JOB_NAME, jobName, -1)
 	job = strings.Replace(job, VAR_APP_LABEL, appLabel, -1)
 	job = strings.Replace(job, VAR_STORAGE_DRIVER, storageDriver, -1)

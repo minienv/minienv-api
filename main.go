@@ -14,8 +14,6 @@ import (
 	"github.com/google/uuid"
 )
 
-var MINIENV_VERSION = "latest"
-
 var STATUS_IDLE = 0
 var STATUS_PROVISIONING = 1
 var STATUS_CLAIMED = 2
@@ -25,6 +23,7 @@ var CHECK_ENV_TIMER_SECONDS = 15
 var DELETE_ENV_NO_ACIVITY_SECONDS int64 = 60
 var EXPIRE_CLAIM_NO_ACIVITY_SECONDS int64 = 30
 
+var minienvVersion = "latest"
 var environments []*Environment
 var envPvHostPath bool
 var envPvTemplate string
@@ -269,7 +268,7 @@ func up(w http.ResponseWriter, r *http.Request) {
 			log.Println("Creating new deployment...")
 			// change status to claimed, so the scheduler doesn't think it has stopped when the old repo is shutdown
 			environment.Status = STATUS_CLAIMED
-			details, err := deployEnv(environment.Id, environment.ClaimToken, nodeNameOverride, envUpRequest.Repo, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			details, err := deployEnv(minienvVersion, environment.Id, environment.ClaimToken, nodeNameOverride, envUpRequest.Repo, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
 				log.Print("Error creating deployment: ", err)
 				http.Error(w, err.Error(), 400)
@@ -372,7 +371,7 @@ func initEnvironments(envCount int) {
 		if ! running {
 			log.Printf("Provisioning environment %s...\n", environment.Id)
 			environment.Status = STATUS_PROVISIONING
-			deployProvisioner(environment.Id, nodeNameOverride, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionVolumeSize, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			deployProvisioner(minienvVersion, environment.Id, nodeNameOverride, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionVolumeSize, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		}
 	}
 	// scale down, if necessary
@@ -433,7 +432,7 @@ func checkEnvironments() {
 				// re-provision
 				log.Printf("Re-provisioning environment %s...\n", environment.Id)
 				environment.Status = STATUS_PROVISIONING
-				deployProvisioner(environment.Id, nodeNameOverride, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionVolumeSize, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+				deployProvisioner(minienvVersion, environment.Id, nodeNameOverride, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionVolumeSize, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			} else {
 				log.Printf("Checking if environment %s is still deployed...\n", environment.Id)
 				deployed, err := isEnvDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
@@ -467,6 +466,7 @@ func main() {
 	if _, err := strconv.Atoi(os.Args[1]); err != nil {
 		log.Fatalf("Invalid port: %s (%s)\n", os.Args[1], err)
 	}
+	minienvVersion = os.Getenv("MINIENV_VERSION")
 	envPvcStorageClass = os.Getenv("MINIENV_VOLUME_STORAGE_CLASS")
 	if envPvcStorageClass == "" {
 		envPvHostPath = true

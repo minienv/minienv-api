@@ -106,7 +106,7 @@ func deleteEnv(envId string, kubeServiceToken string, kubeServiceBaseUrl string,
 	_, _ = waitForPodTermination(appLabel, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 }
 
-func deployEnv(envId string, claimToken string, nodeNameOverride string, gitRepo string, storageDriver string, pvTemplate string, pvcTemplate string, deploymentTemplate string, serviceTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*DeploymentDetails, error) {
+func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameOverride string, gitRepo string, storageDriver string, pvTemplate string, pvcTemplate string, deploymentTemplate string, serviceTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*DeploymentDetails, error) {
 	// delete env, if it exists
 	deleteEnv(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	// download minienv.json
@@ -294,7 +294,7 @@ func deployEnv(envId string, claimToken string, nodeNameOverride string, gitRepo
 	deploymentDetailsStr := deploymentDetailsToString(details)
 	deployment := deploymentTemplate
 	deployment = strings.Replace(deployment, VAR_MINIENV_NODE_NAME_OVERRIDE, nodeNameOverride, -1)
-	deployment = strings.Replace(deployment, VAR_MINIENV_VERSION, MINIENV_VERSION, -1)
+	deployment = strings.Replace(deployment, VAR_MINIENV_VERSION, minienvVersion, -1)
 	deployment = strings.Replace(deployment, VAR_DEPLOYMENT_NAME, deploymentName, -1)
 	deployment = strings.Replace(deployment, VAR_APP_LABEL, appLabel, -1)
 	deployment = strings.Replace(deployment, VAR_CLAIM_TOKEN, claimToken, -1)
