@@ -45,6 +45,7 @@ spec:
             value: "$proxyPort"
           - name: MINIENV_GIT_REPO
             value: "$gitRepo"
+$envVars
       volumes:
         - name: docker-storage
           persistentVolumeClaim:

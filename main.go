@@ -77,9 +77,27 @@ type PingResponse struct {
 	EnvDetails *EnvUpResponse `json:"envDetails"`
 }
 
+type EnvInfoRequest struct {
+	Repo string `json:"repo"`
+}
+
+type EnvInfoResponse struct {
+	Env *EnvInfoResponseEnv `json:"env"`
+}
+
+type EnvInfoResponseEnv struct {
+	Vars *[]EnvInfoResponseEnvVar `json:"vars"`
+}
+
+type EnvInfoResponseEnvVar struct {
+	Name string `json:"name"`
+	DefaultValue string `json:"defaultValue"`
+}
+
 type EnvUpRequest struct {
 	ClaimToken string `json:"claimToken"`
 	Repo string `json:"repo"`
+	EnvVars map[string]string `json:"envVars"`
 }
 
 type EnvUpResponse struct {
@@ -211,6 +229,62 @@ func ping(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func info(w http.ResponseWriter, r *http.Request) {
+	if r.Body == nil {
+		http.Error(w, "Invalid request", 400)
+		return
+	}
+	// decode request
+	var envInfoRequest EnvInfoRequest
+	err := json.NewDecoder(r.Body).Decode(&envInfoRequest)
+	if err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+
+	if whitelistRepos != nil {
+		repoWhitelisted := false
+		for _, element := range whitelistRepos {
+			if envInfoRequest.Repo == element {
+				repoWhitelisted = true
+				break
+			}
+		}
+		if ! repoWhitelisted {
+			log.Println("Up request failed; repo not whitelisted.")
+			http.Error(w, "Invalid repo", 401)
+			return
+		}
+	}
+	// create response
+	var envInfoResponse = &EnvInfoResponse{}
+	minienvConfig, err := downloadMinienvConfig(envInfoRequest.Repo)
+	if err != nil {
+		log.Print("Error getting minienv config: ", err)
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if minienvConfig.Env != nil {
+		envVars := []EnvInfoResponseEnvVar{}
+		for _, configEnvVar := range *minienvConfig.Env.Vars {
+			envVar := EnvInfoResponseEnvVar{}
+			envVar.Name = configEnvVar.Name
+			envVar.DefaultValue = configEnvVar.DefaultValue
+			envVars = append(envVars, envVar)
+		}
+		envInfoResponse.Env = &EnvInfoResponseEnv{}
+		envInfoResponse.Env.Vars = &envVars
+	}
+
+	// return response
+	err = json.NewEncoder(w).Encode(envInfoResponse)
+	if err != nil {
+		log.Print("Error encoding response: ", err)
+		http.Error(w, err.Error(), 400)
+		return
+	}
+}
+
 func up(w http.ResponseWriter, r *http.Request) {
 	if r.Body == nil {
 		http.Error(w, "Invalid request", 400)
@@ -268,7 +342,7 @@ func up(w http.ResponseWriter, r *http.Request) {
 			log.Println("Creating new deployment...")
 			// change status to claimed, so the scheduler doesn't think it has stopped when the old repo is shutdown
 			environment.Status = STATUS_CLAIMED
-			details, err := deployEnv(minienvVersion, environment.Id, environment.ClaimToken, nodeNameOverride, envUpRequest.Repo, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			details, err := deployEnv(minienvVersion, environment.Id, environment.ClaimToken, nodeNameOverride, envUpRequest.Repo, envUpRequest.EnvVars, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
 				log.Print("Error creating deployment: ", err)
 				http.Error(w, err.Error(), 400)
@@ -525,6 +599,7 @@ func main() {
 	initEnvironments(envCount)
 	http.HandleFunc("/api/claim", addCorsAndCacheHeadersThenServe(claim))
 	http.HandleFunc("/api/ping", addCorsAndCacheHeadersThenServe(ping))
+	http.HandleFunc("/api/info", addCorsAndCacheHeadersThenServe(info))
 	http.HandleFunc("/api/up", addCorsAndCacheHeadersThenServe(up))
 	http.HandleFunc("/api/whitelist", addCorsAndCacheHeadersThenServe(whitelist))
 	err := http.ListenAndServe(":"+os.Args[1], nil)

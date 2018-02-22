@@ -28,6 +28,7 @@ var VAR_APP_LABEL string = "$appLabel"
 var VAR_CLAIM_TOKEN string = "$claimToken"
 var VAR_GIT_REPO string = "$gitRepo"
 var VAR_ENV_DETAILS string = "$envDetails"
+var VAR_ENV_VARS string = "$envVars"
 var VAR_STORAGE_DRIVER string = "$storageDriver"
 var VAR_LOG_PORT string = "$logPort"
 var VAR_EDITOR_PORT string = "$editorPort"
@@ -39,8 +40,18 @@ var DEFAULT_EDITOR_PORT string = "30082"
 var DEFAULT_PROXY_PORT string = "30083"
 
 type MinienvConfig struct {
+	Env *MinienvConfigEnv `json:"env"`
 	Editor *MinienvConfigEditor `json:"editor"`
 	Proxy *MinienvConfigProxy `json:"proxy"`
+}
+
+type MinienvConfigEnv struct {
+	Vars *[]MinienvConfigEnvVar `json:"vars"`
+}
+
+type MinienvConfigEnvVar struct {
+	Name string `json:"name"`
+	DefaultValue string `json:"defaultValue"`
 }
 
 type MinienvConfigEditor struct {
@@ -106,9 +117,7 @@ func deleteEnv(envId string, kubeServiceToken string, kubeServiceBaseUrl string,
 	_, _ = waitForPodTermination(appLabel, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 }
 
-func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameOverride string, gitRepo string, storageDriver string, pvTemplate string, pvcTemplate string, deploymentTemplate string, serviceTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*DeploymentDetails, error) {
-	// delete env, if it exists
-	deleteEnv(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+func downloadMinienvConfig(gitRepo string) (MinienvConfig, error) {
 	// download minienv.json
 	var minienvConfig MinienvConfig
 	minienvConfigUrl := fmt.Sprintf("%s/raw/master/minienv.json", gitRepo)
@@ -121,16 +130,41 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	} else {
 		err = json.NewDecoder(resp.Body).Decode(&minienvConfig)
 		if err != nil {
-			log.Println("Error downloading minienv config: ", err)
+			return minienvConfig, err
 		}
+	}
+	return minienvConfig, nil
+}
+
+func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameOverride string, gitRepo string, envVars map[string]string, storageDriver string, pvTemplate string, pvcTemplate string, deploymentTemplate string, serviceTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*DeploymentDetails, error) {
+	envVarsYaml := ""
+	if envVars != nil {
+		first := true
+		for k, v := range envVars {
+			if ! first {
+				envVarsYaml += "\n"
+			} else {
+				first = false
+			}
+			envVarsYaml += "          - name: " + k
+			envVarsYaml += "\n            value: \"" + v + "\""
+		}
+	}
+	// delete env, if it exists
+	deleteEnv(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+	// download minienv.json
+	minienvConfig, err := downloadMinienvConfig(gitRepo)
+	if err != nil {
+		log.Println("Error downloading minienv.json", err)
+		return nil, err
 	}
 	// download docker-compose file (first try yml, then yaml)
 	tabs := []*Tab{}
 	dockerComposeUrl := fmt.Sprintf("%s/raw/master/docker-compose.yml", gitRepo)
 	log.Printf("Downloading docker-compose file from '%s'...\n", dockerComposeUrl)
-	client = getHttpClient()
-	req, err = http.NewRequest("GET", dockerComposeUrl, nil)
-	resp, err = client.Do(req)
+	client := getHttpClient()
+	req, err := http.NewRequest("GET", dockerComposeUrl, nil)
+	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != 200 {
 		log.Println("Error downloading docker-compose.yml: ", err)
 		dockerComposeUrl := fmt.Sprintf("%s/raw/master/docker-compose.yaml", gitRepo)
@@ -300,6 +334,7 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	deployment = strings.Replace(deployment, VAR_CLAIM_TOKEN, claimToken, -1)
 	deployment = strings.Replace(deployment, VAR_GIT_REPO, gitRepo, -1)
 	deployment = strings.Replace(deployment, VAR_ENV_DETAILS, deploymentDetailsStr, -1)
+	deployment = strings.Replace(deployment, VAR_ENV_VARS, envVarsYaml, -1)
 	deployment = strings.Replace(deployment, VAR_STORAGE_DRIVER, storageDriver, -1)
 	deployment = strings.Replace(deployment, VAR_LOG_PORT, DEFAULT_LOG_PORT, -1)
 	deployment = strings.Replace(deployment, VAR_EDITOR_PORT, DEFAULT_EDITOR_PORT, -1)
