@@ -16,12 +16,13 @@ spec:
       containers:
         - name: minienv
           image: localhost:5000/minienv/minienv:$minienvVersion
+          imagePullPolicy: Always
           volumeMounts:
             - mountPath: "/var/lib/docker"
               name: docker-storage
-          resources:
-            limits:
-              memory: "512Mi"
+          #resources:
+          #  limits:
+          #    memory: "512Mi"
           securityContext:
             privileged: true
           env:
