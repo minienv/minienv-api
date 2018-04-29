@@ -40,7 +40,12 @@ var kubeNamespace string
 var nodeNameOverride string
 var storageDriver string
 var allowOrigin string
-var whitelistRepos []string
+var whitelistRepos []*WhitelistRepo
+
+type WhitelistRepo struct {
+	Name string `json:"name"`
+	Url string `json:"url"`
+}
 
 type Environment struct {
 	Id string
@@ -62,7 +67,7 @@ type ClaimResponse struct {
 }
 
 type WhitelistResponse struct {
-	Repos []string `json:"repos"`
+	Repos []*WhitelistRepo `json:"repos"`
 }
 
 type PingRequest struct {
@@ -245,7 +250,7 @@ func info(w http.ResponseWriter, r *http.Request) {
 	if whitelistRepos != nil {
 		repoWhitelisted := false
 		for _, element := range whitelistRepos {
-			if envInfoRequest.Repo == element {
+			if envInfoRequest.Repo == element.Url {
 				repoWhitelisted = true
 				break
 			}
@@ -312,7 +317,7 @@ func up(w http.ResponseWriter, r *http.Request) {
 		if whitelistRepos != nil {
 			repoWhitelisted := false
 			for _, element := range whitelistRepos {
-				if envUpRequest.Repo == element {
+				if envUpRequest.Repo == element.Url {
 					repoWhitelisted = true
 					break
 				}
@@ -591,9 +596,25 @@ func main() {
 	if whitelistReposStr == "" {
 		whitelistRepos = nil
 	} else {
-		whitelistRepos = strings.Split(whitelistReposStr, ",")
-		if len(whitelistRepos) <= 0 {
+		whitelistRepoStrs := strings.Split(whitelistReposStr, ",")
+		if len(whitelistRepoStrs) <= 0 {
 			whitelistRepos = nil
+		} else {
+			whitelistRepos = []*WhitelistRepo{}
+			var name string
+			var url string
+			for _, element := range whitelistRepoStrs {
+				elementStrs := strings.Split(element, "|")
+				if len(elementStrs) == 2 {
+					name = elementStrs[0]
+					url = elementStrs[1]
+				} else {
+					name = element
+					url = element
+				}
+				whitelistRepo := &WhitelistRepo{Name: name, Url: url}
+				whitelistRepos = append(whitelistRepos, whitelistRepo)
+			}
 		}
 	}
 	initEnvironments(envCount)
