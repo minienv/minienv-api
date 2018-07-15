@@ -22,6 +22,7 @@ var STATUS_RUNNING = 3
 var CHECK_ENV_TIMER_SECONDS = 15
 var DELETE_ENV_NO_ACIVITY_SECONDS int64 = 60
 var EXPIRE_CLAIM_NO_ACIVITY_SECONDS int64 = 30
+var DEFAULT_BRANCH = "master"
 
 var minienvVersion = "latest"
 var environments []*Environment
@@ -45,6 +46,7 @@ var whitelistRepos []*WhitelistRepo
 type WhitelistRepo struct {
 	Name string `json:"name"`
 	Url string `json:"url"`
+	Branch string `json:"branch"`
 }
 
 type Environment struct {
@@ -53,6 +55,7 @@ type Environment struct {
 	ClaimToken string
 	LastActivity int64
 	Repo string
+	Branch string
 	Details *EnvUpResponse
 }
 
@@ -79,11 +82,13 @@ type PingResponse struct {
 	ClaimGranted bool `json:"claimGranted"`
 	Up bool `json:"up"`
 	Repo string `json:"repo"`
+	Branch string `json:"branch"`
 	EnvDetails *EnvUpResponse `json:"envDetails"`
 }
 
 type EnvInfoRequest struct {
 	Repo string `json:"repo"`
+	Branch string `json:"branch"`
 }
 
 type EnvInfoResponse struct {
@@ -102,6 +107,7 @@ type EnvInfoResponseEnvVar struct {
 type EnvUpRequest struct {
 	ClaimToken string `json:"claimToken"`
 	Repo string `json:"repo"`
+	Branch string `json:"branch"`
 	EnvVars map[string]string `json:"envVars"`
 }
 
@@ -109,7 +115,6 @@ type EnvUpResponse struct {
 	LogUrl string `json:"logUrl"`
 	EditorUrl string `json:"editorUrl"`
 	Tabs *[]*Tab `json:"tabs"`
-	DeployToBluemix bool `json:"deployToBluemix"`
 }
 
 func claim(w http.ResponseWriter, r *http.Request) {
@@ -207,7 +212,8 @@ func ping(w http.ResponseWriter, r *http.Request) {
 		environment.LastActivity = time.Now().Unix()
 		pingResponse.ClaimGranted = true
 		pingResponse.Up = environment.Status == STATUS_RUNNING
-		pingResponse.Repo = environment.Repo;
+		pingResponse.Repo = environment.Repo
+		pingResponse.Branch = environment.Branch
 		if pingResponse.Up && pingRequest.GetEnvDetails {
 			// make sure to check if it is really running
 			exists, err := isEnvDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
@@ -222,6 +228,7 @@ func ping(w http.ResponseWriter, r *http.Request) {
 			} else {
 				environment.Status = STATUS_CLAIMED
 				environment.Repo = ""
+				environment.Branch = ""
 				environment.Details = nil
 			}
 		}
@@ -245,12 +252,14 @@ func info(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
+	} else if envInfoRequest.Branch == "" {
+		envInfoRequest.Branch = DEFAULT_BRANCH
 	}
 
 	if whitelistRepos != nil {
 		repoWhitelisted := false
 		for _, element := range whitelistRepos {
-			if envInfoRequest.Repo == element.Url {
+			if envInfoRequest.Repo == element.Url && envInfoRequest.Branch == element.Branch {
 				repoWhitelisted = true
 				break
 			}
@@ -263,7 +272,7 @@ func info(w http.ResponseWriter, r *http.Request) {
 	}
 	// create response
 	var envInfoResponse = &EnvInfoResponse{}
-	minienvConfig, err := downloadMinienvConfig(envInfoRequest.Repo)
+	minienvConfig, err := downloadMinienvConfig(envInfoRequest.Repo, envInfoRequest.Branch)
 	if err != nil {
 		log.Print("Error getting minienv config: ", err)
 		http.Error(w, err.Error(), 400)
@@ -301,6 +310,8 @@ func up(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
+	} else if envUpRequest.Branch == "" {
+		envUpRequest.Branch = DEFAULT_BRANCH
 	}
 	var environment *Environment
 	for _, element := range environments {
@@ -317,7 +328,7 @@ func up(w http.ResponseWriter, r *http.Request) {
 		if whitelistRepos != nil {
 			repoWhitelisted := false
 			for _, element := range whitelistRepos {
-				if envUpRequest.Repo == element.Url {
+				if envUpRequest.Repo == element.Url && envUpRequest.Branch == element.Branch {
 					repoWhitelisted = true
 					break
 				}
@@ -338,7 +349,7 @@ func up(w http.ResponseWriter, r *http.Request) {
 			return
 		} else if exists {
 			log.Printf("Env deployed for claim %s.\n", environment.Id)
-			if environment.Status == STATUS_RUNNING && strings.EqualFold(envUpRequest.Repo, environment.Repo) {
+			if environment.Status == STATUS_RUNNING && strings.EqualFold(envUpRequest.Repo, environment.Repo) && strings.EqualFold(envUpRequest.Branch, environment.Branch) {
 				log.Println("Returning existing environment details...")
 				envUpResponse = environment.Details
 			}
@@ -347,15 +358,16 @@ func up(w http.ResponseWriter, r *http.Request) {
 			log.Println("Creating new deployment...")
 			// change status to claimed, so the scheduler doesn't think it has stopped when the old repo is shutdown
 			environment.Status = STATUS_CLAIMED
-			details, err := deployEnv(minienvVersion, environment.Id, environment.ClaimToken, nodeNameOverride, envUpRequest.Repo, envUpRequest.EnvVars, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			details, err := deployEnv(minienvVersion, environment.Id, environment.ClaimToken, nodeNameOverride, envUpRequest.Repo, envUpRequest.Branch, envUpRequest.EnvVars, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
 				log.Print("Error creating deployment: ", err)
 				http.Error(w, err.Error(), 400)
 				return
 			} else {
-				envUpResponse = getEnvUpResponse(envUpRequest.Repo, details)
+				envUpResponse = getEnvUpResponse(details)
 				environment.Status = STATUS_RUNNING
 				environment.Repo = envUpRequest.Repo
+				environment.Branch = envUpRequest.Branch
 				environment.Details = envUpResponse
 			}
 		}
@@ -369,22 +381,16 @@ func up(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getEnvUpResponse(repo string, details *DeploymentDetails) (*EnvUpResponse) {
+func getEnvUpResponse(details *DeploymentDetails) (*EnvUpResponse) {
 	envUpResponse := &EnvUpResponse{}
-	// TODO: this should be a readme instead - that way it can support anything
-	envUpResponse.DeployToBluemix = isManifestInRepo(repo)
 	envUpResponse.LogUrl = details.LogUrl
 	envUpResponse.EditorUrl = details.EditorUrl
 	envUpResponse.Tabs = details.Tabs
 	return envUpResponse
 }
 
-func isManifestInRepo(gitRepo string) (bool) {
-	return isFileInRepo(gitRepo, "manifest.yml") || isFileInRepo(gitRepo, "manifest.yaml")
-}
-
-func isFileInRepo(gitRepo string, file string) (bool) {
-	url := fmt.Sprintf("%s/raw/master/%s", gitRepo, file)
+func isFileInRepo(gitRepo string, gitBranch string, file string) (bool) {
+	url := fmt.Sprintf("%s/raw/%s/%s", gitRepo, gitBranch, file)
 	client := getHttpClient()
 	req, err := http.NewRequest("GET", url, nil)
 	res, err := client.Do(req)
@@ -436,11 +442,12 @@ func initEnvironments(envCount int) {
 				log.Printf("Loading environment %s from deployment metadata.\n", environment.Id)
 				running = true
 				details  := deploymentDetailsFromString(getDeploymentResp.Spec.Template.Metadata.Annotations.EnvDetails)
-				envUpResponse := getEnvUpResponse(getDeploymentResp.Spec.Template.Metadata.Annotations.Repo, details)
+				envUpResponse := getEnvUpResponse(details)
 				environment.Status = STATUS_RUNNING
 				environment.ClaimToken = getDeploymentResp.Spec.Template.Metadata.Annotations.ClaimToken
 				environment.LastActivity = time.Now().Unix()
 				environment.Repo = getDeploymentResp.Spec.Template.Metadata.Annotations.Repo
+				environment.Branch = getDeploymentResp.Spec.Template.Metadata.Annotations.Branch
 				environment.Details = envUpResponse
 			} else {
 				log.Printf("Insufficient deployment metadata for environment %s.\n", environment.Id)
@@ -506,6 +513,7 @@ func checkEnvironments() {
 				environment.ClaimToken = ""
 				environment.LastActivity = 0
 				environment.Repo = ""
+				environment.Branch = ""
 				environment.Details = nil
 				deleteEnv(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 				// re-provision
@@ -521,6 +529,7 @@ func checkEnvironments() {
 					environment.ClaimToken = ""
 					environment.LastActivity = 0
 					environment.Repo = ""
+					environment.Branch = ""
 					environment.Details = nil
 				}
 			}
@@ -531,6 +540,7 @@ func checkEnvironments() {
 				environment.ClaimToken = ""
 				environment.LastActivity = 0
 				environment.Repo = ""
+				environment.Branch = ""
 				environment.Details = nil
 			}
 		}
@@ -603,16 +613,23 @@ func main() {
 			whitelistRepos = []*WhitelistRepo{}
 			var name string
 			var url string
+			var branch string
 			for _, element := range whitelistRepoStrs {
 				elementStrs := strings.Split(element, "|")
-				if len(elementStrs) == 2 {
+				if len(elementStrs) >= 2 {
 					name = elementStrs[0]
 					url = elementStrs[1]
+					if len(elementStrs) == 3 {
+						branch = elementStrs[2]
+					} else {
+						branch = DEFAULT_BRANCH
+					}
 				} else {
 					name = element
 					url = element
+					branch = DEFAULT_BRANCH
 				}
-				whitelistRepo := &WhitelistRepo{Name: name, Url: url}
+				whitelistRepo := &WhitelistRepo{Name: name, Url: url, Branch: branch}
 				whitelistRepos = append(whitelistRepos, whitelistRepo)
 			}
 		}

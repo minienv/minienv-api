@@ -72,6 +72,7 @@ type GetDeploymentSpecTemplateMetadata struct {
 
 type GetDeploymentSpecTemplateMetadataAnnotation struct {
 	Repo string `json:"minienv.repo"`
+	Branch string `json:"minienv.branch"`
 	ClaimToken string `json:"minienv.claimToken"`
 	EnvDetails string `json:"minienv.envDetails"`
 }

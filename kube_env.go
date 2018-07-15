@@ -15,29 +15,30 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-var VAR_MINIENV_NODE_NAME_OVERRIDE string = "$minienvNodeNameOverride"
-var VAR_MINIENV_VERSION string = "$minienvVersion"
-var VAR_PV_NAME string = "$pvName"
-var VAR_PV_SIZE string = "$pvSize"
-var VAR_PV_PATH string = "$pvPath"
-var VAR_PVC_NAME string = "$pvcName"
-var VAR_PVC_STORAGE_CLASS string = "$pvcStorageClass"
-var VAR_SERVICE_NAME string = "$serviceName"
-var VAR_DEPLOYMENT_NAME string = "$deploymentName"
-var VAR_APP_LABEL string = "$appLabel"
-var VAR_CLAIM_TOKEN string = "$claimToken"
-var VAR_GIT_REPO string = "$gitRepo"
-var VAR_ENV_DETAILS string = "$envDetails"
-var VAR_ENV_VARS string = "$envVars"
-var VAR_STORAGE_DRIVER string = "$storageDriver"
-var VAR_LOG_PORT string = "$logPort"
-var VAR_EDITOR_PORT string = "$editorPort"
-var VAR_PROXY_PORT string = "$proxyPort"
-var VAR_ALLOW_ORIGIN string = "$allowOrigin"
+var VAR_MINIENV_NODE_NAME_OVERRIDE = "$minienvNodeNameOverride"
+var VAR_MINIENV_VERSION = "$minienvVersion"
+var VAR_PV_NAME = "$pvName"
+var VAR_PV_SIZE = "$pvSize"
+var VAR_PV_PATH = "$pvPath"
+var VAR_PVC_NAME = "$pvcName"
+var VAR_PVC_STORAGE_CLASS = "$pvcStorageClass"
+var VAR_SERVICE_NAME = "$serviceName"
+var VAR_DEPLOYMENT_NAME = "$deploymentName"
+var VAR_APP_LABEL = "$appLabel"
+var VAR_CLAIM_TOKEN = "$claimToken"
+var VAR_GIT_REPO = "$gitRepo"
+var VAR_GIT_BRANCH = "$gitBranch"
+var VAR_ENV_DETAILS = "$envDetails"
+var VAR_ENV_VARS = "$envVars"
+var VAR_STORAGE_DRIVER = "$storageDriver"
+var VAR_LOG_PORT = "$logPort"
+var VAR_EDITOR_PORT = "$editorPort"
+var VAR_PROXY_PORT = "$proxyPort"
+var VAR_ALLOW_ORIGIN = "$allowOrigin"
 
-var DEFAULT_LOG_PORT string = "30081"
-var DEFAULT_EDITOR_PORT string = "30082"
-var DEFAULT_PROXY_PORT string = "30083"
+var DEFAULT_LOG_PORT = "30081"
+var DEFAULT_EDITOR_PORT = "30082"
+var DEFAULT_PROXY_PORT = "30083"
 
 type MinienvConfig struct {
 	Env *MinienvConfigEnv `json:"env"`
@@ -117,10 +118,10 @@ func deleteEnv(envId string, kubeServiceToken string, kubeServiceBaseUrl string,
 	_, _ = waitForPodTermination(appLabel, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 }
 
-func downloadMinienvConfig(gitRepo string) (MinienvConfig, error) {
+func downloadMinienvConfig(gitRepo string, gitBranch string) (MinienvConfig, error) {
 	// download minienv.json
 	var minienvConfig MinienvConfig
-	minienvConfigUrl := fmt.Sprintf("%s/raw/master/minienv.json", gitRepo)
+	minienvConfigUrl := fmt.Sprintf("%s/raw/%s/minienv.json", gitRepo, gitBranch)
 	log.Printf("Downloading minienv config from '%s'...\n", minienvConfigUrl)
 	client := getHttpClient()
 	req, err := http.NewRequest("GET", minienvConfigUrl, nil)
@@ -136,7 +137,7 @@ func downloadMinienvConfig(gitRepo string) (MinienvConfig, error) {
 	return minienvConfig, nil
 }
 
-func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameOverride string, gitRepo string, envVars map[string]string, storageDriver string, pvTemplate string, pvcTemplate string, deploymentTemplate string, serviceTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*DeploymentDetails, error) {
+func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameOverride string, gitRepo string, gitBranch string, envVars map[string]string, storageDriver string, pvTemplate string, pvcTemplate string, deploymentTemplate string, serviceTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*DeploymentDetails, error) {
 	envVarsYaml := ""
 	if envVars != nil {
 		first := true
@@ -153,7 +154,7 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	// delete env, if it exists
 	deleteEnv(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	// download minienv.json
-	minienvConfig, err := downloadMinienvConfig(gitRepo)
+	minienvConfig, err := downloadMinienvConfig(gitRepo, gitBranch)
 	if err != nil {
 		log.Println("Error downloading minienv.json", err)
 		return nil, err
@@ -333,6 +334,7 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	deployment = strings.Replace(deployment, VAR_APP_LABEL, appLabel, -1)
 	deployment = strings.Replace(deployment, VAR_CLAIM_TOKEN, claimToken, -1)
 	deployment = strings.Replace(deployment, VAR_GIT_REPO, gitRepo, -1)
+	deployment = strings.Replace(deployment, VAR_GIT_BRANCH, gitBranch, -1)
 	deployment = strings.Replace(deployment, VAR_ENV_DETAILS, deploymentDetailsStr, -1)
 	deployment = strings.Replace(deployment, VAR_ENV_VARS, envVarsYaml, -1)
 	deployment = strings.Replace(deployment, VAR_STORAGE_DRIVER, storageDriver, -1)

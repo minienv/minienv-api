@@ -11,6 +11,7 @@ spec:
       annotations:
         minienv.claimToken: "$claimToken"
         minienv.repo: "$gitRepo"
+        minienv.branch: "$gitBranch"
         minienv.envDetails: "$envDetails"
     spec:
       containers:
@@ -46,6 +47,8 @@ spec:
             value: "$proxyPort"
           - name: MINIENV_GIT_REPO
             value: "$gitRepo"
+          - name: MINIENV_GIT_BRANCH
+            value: "$gitBranch"
 $envVars
       volumes:
         - name: docker-storage
