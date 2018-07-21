@@ -20,8 +20,8 @@ var STATUS_CLAIMED = 2
 var STATUS_RUNNING = 3
 
 var CHECK_ENV_TIMER_SECONDS = 15
-var DELETE_ENV_NO_ACIVITY_SECONDS int64 = 60
 var EXPIRE_CLAIM_NO_ACIVITY_SECONDS int64 = 30
+var DEFAULT_ENV_EXPIRATION_SECONDS int64 = 60
 var DEFAULT_BRANCH = "master"
 
 var minienvVersion = "latest"
@@ -57,6 +57,7 @@ type Environment struct {
 	Repo string
 	Branch string
 	Details *EnvUpResponse
+	ExpirationSeconds int64
 }
 
 type ClaimRequest struct {
@@ -108,6 +109,7 @@ type EnvUpRequest struct {
 	ClaimToken string `json:"claimToken"`
 	Repo string `json:"repo"`
 	Branch string `json:"branch"`
+	ExpirationSeconds int64 `json:"expirationSeconds"`
 	EnvVars map[string]string `json:"envVars"`
 }
 
@@ -369,6 +371,11 @@ func up(w http.ResponseWriter, r *http.Request) {
 				environment.Repo = envUpRequest.Repo
 				environment.Branch = envUpRequest.Branch
 				environment.Details = envUpResponse
+				if envUpRequest.ExpirationSeconds >= 0 {
+					environment.ExpirationSeconds = envUpRequest.ExpirationSeconds
+				} else {
+					environment.ExpirationSeconds = DEFAULT_ENV_EXPIRATION_SECONDS
+				}
 			}
 		}
 		// return response
@@ -507,7 +514,7 @@ func checkEnvironments() {
 				log.Printf("Environment %s still provisioning...\n", environment.Id)
 			}
 		} else if environment.Status == STATUS_RUNNING {
-			if time.Now().Unix() - environment.LastActivity > DELETE_ENV_NO_ACIVITY_SECONDS {
+			if time.Now().Unix() - environment.LastActivity > DEFAULT_ENV_EXPIRATION_SECONDS {
 				log.Printf("Environment %s no longer active.\n", environment.Id)
 				environment.Status = STATUS_IDLE
 				environment.ClaimToken = ""
