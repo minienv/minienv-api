@@ -119,6 +119,9 @@ type EnvUpResponse struct {
 	Tabs *[]*Tab `json:"tabs"`
 }
 
+func root(w http.ResponseWriter, r *http.Request) {
+}
+
 func claim(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "Invalid claim request", 400)
@@ -642,6 +645,7 @@ func main() {
 		}
 	}
 	initEnvironments(envCount)
+	http.HandleFunc("/", addCorsAndCacheHeadersThenServe(root))
 	http.HandleFunc("/api/claim", addCorsAndCacheHeadersThenServe(claim))
 	http.HandleFunc("/api/ping", addCorsAndCacheHeadersThenServe(ping))
 	http.HandleFunc("/api/info", addCorsAndCacheHeadersThenServe(info))
