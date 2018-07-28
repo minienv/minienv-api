@@ -118,10 +118,25 @@ func deleteEnv(envId string, kubeServiceToken string, kubeServiceBaseUrl string,
 	_, _ = waitForPodTermination(appLabel, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 }
 
-func downloadMinienvConfig(gitRepo string, gitBranch string) (MinienvConfig, error) {
+func getUrlWithCredentials(url string, username string, password string) (string) {
+	if username != "" && password != "" {
+		url = strings.Replace(url, "https://", fmt.Sprintf("https://%s:%s@", username, password), 1)
+		url = strings.Replace(url, "http://", fmt.Sprintf("http://%s:%s@", username, password), 1)
+	}
+	return url
+}
+
+func getDownloadUrl(path string, gitRepo string, gitBranch string, gitUsername string, gitPassword string) (string) {
+	url := fmt.Sprintf("%s/%s/%s", gitRepo, gitBranch, path)
+	url = strings.Replace(url, "github.com", "raw.githubusercontent.com", 1)
+	url = getUrlWithCredentials(url, gitUsername, gitPassword)
+	return url
+}
+
+func downloadMinienvConfig(gitRepo string, gitBranch string, gitUsername string, gitPassword string) (MinienvConfig, error) {
 	// download minienv.json
 	var minienvConfig MinienvConfig
-	minienvConfigUrl := fmt.Sprintf("%s/raw/%s/minienv.json", gitRepo, gitBranch)
+	minienvConfigUrl := getDownloadUrl("minienv.json", gitRepo, gitBranch, gitUsername, gitPassword)
 	log.Printf("Downloading minienv config from '%s'...\n", minienvConfigUrl)
 	client := getHttpClient()
 	req, err := http.NewRequest("GET", minienvConfigUrl, nil)
@@ -137,7 +152,7 @@ func downloadMinienvConfig(gitRepo string, gitBranch string) (MinienvConfig, err
 	return minienvConfig, nil
 }
 
-func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameOverride string, gitRepo string, gitBranch string, envVars map[string]string, storageDriver string, pvTemplate string, pvcTemplate string, deploymentTemplate string, serviceTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*DeploymentDetails, error) {
+func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameOverride string, gitRepo string, gitBranch string, gitUsername string, gitPassword string, envVars map[string]string, storageDriver string, pvTemplate string, pvcTemplate string, deploymentTemplate string, serviceTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*DeploymentDetails, error) {
 	envVarsYaml := ""
 	if envVars != nil {
 		first := true
@@ -154,21 +169,21 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	// delete env, if it exists
 	deleteEnv(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	// download minienv.json
-	minienvConfig, err := downloadMinienvConfig(gitRepo, gitBranch)
+	minienvConfig, err := downloadMinienvConfig(gitRepo, gitBranch, gitUsername, gitPassword)
 	if err != nil {
 		log.Println("Error downloading minienv.json", err)
 		return nil, err
 	}
 	// download docker-compose file (first try yml, then yaml)
 	tabs := []*Tab{}
-	dockerComposeUrl := fmt.Sprintf("%s/raw/master/docker-compose.yml", gitRepo)
+	dockerComposeUrl := getDownloadUrl("docker-compose.yml", gitRepo, gitBranch, gitUsername, gitPassword)
 	log.Printf("Downloading docker-compose file from '%s'...\n", dockerComposeUrl)
 	client := getHttpClient()
 	req, err := http.NewRequest("GET", dockerComposeUrl, nil)
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != 200 {
 		log.Println("Error downloading docker-compose.yml: ", err)
-		dockerComposeUrl := fmt.Sprintf("%s/raw/master/docker-compose.yaml", gitRepo)
+		dockerComposeUrl := getDownloadUrl("docker-compose.yaml", gitRepo, gitBranch, gitUsername, gitPassword)
 		req, err = http.NewRequest("GET", dockerComposeUrl, nil)
 		resp, err = client.Do(req)
 		if err != nil || resp.StatusCode != 200 {
@@ -324,7 +339,8 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	}
 	details.Tabs = &tabs
 	// create the deployment
-	// TODO: Check if default ports are going to work and if not change them
+	// TODO: Check if default ports are going to work and if not change them (i.e. if the docker-compose file is using the same ports)
+	gitRepoWithCreds := getUrlWithCredentials(gitRepo, gitUsername, gitPassword)
 	deploymentName := getEnvDeploymentName(envId)
 	deploymentDetailsStr := deploymentDetailsToString(details)
 	deployment := deploymentTemplate
@@ -333,7 +349,7 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	deployment = strings.Replace(deployment, VAR_DEPLOYMENT_NAME, deploymentName, -1)
 	deployment = strings.Replace(deployment, VAR_APP_LABEL, appLabel, -1)
 	deployment = strings.Replace(deployment, VAR_CLAIM_TOKEN, claimToken, -1)
-	deployment = strings.Replace(deployment, VAR_GIT_REPO, gitRepo, -1)
+	deployment = strings.Replace(deployment, VAR_GIT_REPO, gitRepoWithCreds, -1)
 	deployment = strings.Replace(deployment, VAR_GIT_BRANCH, gitBranch, -1)
 	deployment = strings.Replace(deployment, VAR_ENV_DETAILS, deploymentDetailsStr, -1)
 	deployment = strings.Replace(deployment, VAR_ENV_VARS, envVarsYaml, -1)

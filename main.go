@@ -90,6 +90,8 @@ type PingResponse struct {
 type EnvInfoRequest struct {
 	Repo string `json:"repo"`
 	Branch string `json:"branch"`
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 type EnvInfoResponse struct {
@@ -109,6 +111,8 @@ type EnvUpRequest struct {
 	ClaimToken string `json:"claimToken"`
 	Repo string `json:"repo"`
 	Branch string `json:"branch"`
+	Username string `json:"username"`
+	Password string `json:"password"`
 	ExpirationSeconds int64 `json:"expirationSeconds"`
 	EnvVars map[string]string `json:"envVars"`
 }
@@ -277,7 +281,7 @@ func info(w http.ResponseWriter, r *http.Request) {
 	}
 	// create response
 	var envInfoResponse = &EnvInfoResponse{}
-	minienvConfig, err := downloadMinienvConfig(envInfoRequest.Repo, envInfoRequest.Branch)
+	minienvConfig, err := downloadMinienvConfig(envInfoRequest.Repo, envInfoRequest.Branch, envInfoRequest.Username, envInfoRequest.Password)
 	if err != nil {
 		log.Print("Error getting minienv config: ", err)
 		http.Error(w, err.Error(), 400)
@@ -363,7 +367,7 @@ func up(w http.ResponseWriter, r *http.Request) {
 			log.Println("Creating new deployment...")
 			// change status to claimed, so the scheduler doesn't think it has stopped when the old repo is shutdown
 			environment.Status = STATUS_CLAIMED
-			details, err := deployEnv(minienvVersion, environment.Id, environment.ClaimToken, nodeNameOverride, envUpRequest.Repo, envUpRequest.Branch, envUpRequest.EnvVars, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			details, err := deployEnv(minienvVersion, environment.Id, environment.ClaimToken, nodeNameOverride, envUpRequest.Repo, envUpRequest.Branch, envUpRequest.Username, envUpRequest.Password, envUpRequest.EnvVars, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
 				log.Print("Error creating deployment: ", err)
 				http.Error(w, err.Error(), 400)
