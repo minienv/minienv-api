@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"bytes"
 )
 
 var STATUS_IDLE = 0
@@ -25,6 +26,8 @@ var DEFAULT_ENV_EXPIRATION_SECONDS int64 = 60
 var DEFAULT_BRANCH = "master"
 
 var minienvVersion = "latest"
+var githubClientId string
+var githubClientSecret string
 var environments []*Environment
 var envPvHostPath bool
 var envPvTemplate string
@@ -42,6 +45,16 @@ var nodeNameOverride string
 var storageDriver string
 var allowOrigin string
 var whitelistRepos []*WhitelistRepo
+
+type GitHubAuthTokenRequest struct {
+	ClientId string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+	Code string `json:"code"`
+}
+
+type GitHubAuthTokenResponse struct {
+	AccessToken string `json:"access_token"`
+}
 
 type WhitelistRepo struct {
 	Name string `json:"name"`
@@ -124,6 +137,53 @@ type EnvUpResponse struct {
 }
 
 func root(w http.ResponseWriter, r *http.Request) {
+}
+
+func authCallback(w http.ResponseWriter, r *http.Request) {
+	// https://github.com/login/oauth/authorize?scope=user:email,read:org,repo,&client_id=<ClientID>
+	if r.Method != "GET" {
+		http.Error(w, "Invalid auth callback request", 400)
+	}
+	codeVals, ok := r.URL.Query()["code"]
+	if !ok || len(codeVals[0]) < 1 {
+		http.Error(w, "code missing", 400)
+		return
+	}
+	url := "https://github.com/login/oauth/access_token"
+	authTokenRequest := GitHubAuthTokenRequest{
+		ClientId: githubClientId,
+		ClientSecret: githubClientSecret,
+		Code: codeVals[0],
+	}
+	b, err := json.Marshal(authTokenRequest)
+	if err != nil {
+		log.Println("Error serializing auth token request: ", err)
+		http.Error(w, "error serializing auth token request", 400)
+		return
+	}
+	client := getHttpClient()
+	req, err := http.NewRequest("POST", url, bytes.NewReader(b))
+	req.Header.Add("Accept", "application/json")
+	req.Header.Add("Content-Type", "application/json")
+	if len(kubeServiceToken) > 0 {
+		req.Header.Add("Authorization", "Bearer " + kubeServiceToken)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Println("Error getting access token: ", err)
+		http.Error(w, "error getting access token", 400)
+		return
+	} else {
+		var authTokenResponse GitHubAuthTokenResponse
+		err := json.NewDecoder(resp.Body).Decode(&authTokenResponse)
+		if err != nil {
+			log.Println("Error getting access token: ", err)
+			http.Error(w, "error getting access token", 400)
+			return
+		} else {
+			log.Println("Access token: ", authTokenResponse.AccessToken)
+		}
+	}
 }
 
 func claim(w http.ResponseWriter, r *http.Request) {
@@ -570,6 +630,8 @@ func main() {
 		log.Fatalf("Invalid port: %s (%s)\n", os.Args[1], err)
 	}
 	minienvVersion = os.Getenv("MINIENV_VERSION")
+	githubClientId = os.Getenv("MINIENV_GITHUB_CLIENT_ID")
+	githubClientSecret = os.Getenv("MINIENV_GITHUB_CLIENT_SECRET")
 	envPvcStorageClass = os.Getenv("MINIENV_VOLUME_STORAGE_CLASS")
 	if envPvcStorageClass == "" {
 		envPvHostPath = true
@@ -649,7 +711,8 @@ func main() {
 		}
 	}
 	initEnvironments(envCount)
-	http.HandleFunc("/", addCorsAndCacheHeadersThenServe(root))
+	http.HandleFunc("/", root)
+	http.HandleFunc("/auth/callback", authCallback)
 	http.HandleFunc("/api/claim", addCorsAndCacheHeadersThenServe(claim))
 	http.HandleFunc("/api/ping", addCorsAndCacheHeadersThenServe(ping))
 	http.HandleFunc("/api/info", addCorsAndCacheHeadersThenServe(info))
