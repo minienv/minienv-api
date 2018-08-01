@@ -13,19 +13,22 @@ import (
 
 	"github.com/google/uuid"
 	"bytes"
+
 )
 
-var STATUS_IDLE = 0
-var STATUS_PROVISIONING = 1
-var STATUS_CLAIMED = 2
-var STATUS_RUNNING = 3
+const StatusIdle = 0
+const StatusProvisioning = 1
+const StatusClaimed = 2
+const StatusRunning = 3
 
-var CHECK_ENV_TIMER_SECONDS = 15
-var EXPIRE_CLAIM_NO_ACIVITY_SECONDS int64 = 30
-var DEFAULT_ENV_EXPIRATION_SECONDS int64 = 60
-var DEFAULT_BRANCH = "master"
+const CheckEnvTimerSeconds = 15
+const ExpireClaimNoActivitySeconds int64 = 30
+const DefaultEnvExpirationSeconds int64 = 60
+const DefaultBranch = "master"
 
 var minienvVersion = "latest"
+var githubAuthEnabled = false
+var githubAuthUsers map[string]*GitHubAuthUser
 var githubClientId string
 var githubClientSecret string
 var environments []*Environment
@@ -45,6 +48,14 @@ var nodeNameOverride string
 var storageDriver string
 var allowOrigin string
 var whitelistRepos []*WhitelistRepo
+
+type GitHubAuthUser struct {
+	Email string `json:"email"`
+}
+
+type MeResponse struct {
+	User *GitHubAuthUser `json:"user"`
+}
 
 type GitHubAuthTokenRequest struct {
 	ClientId string `json:"client_id"`
@@ -139,8 +150,32 @@ type EnvUpResponse struct {
 func root(w http.ResponseWriter, r *http.Request) {
 }
 
+func me(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, "Invalid me request", 400)
+	}
+	accessToken := r.Header.Get("X-Access-Token")
+	if accessToken == "" {
+		http.Error(w, "Not authenticated", 401)
+	} else {
+		githubUser := githubAuthUsers[accessToken]
+		if githubUser != nil {
+			meResponse := MeResponse{
+				User: githubUser,
+			}
+			err := json.NewEncoder(w).Encode(&meResponse)
+			if err != nil {
+				log.Println("Error encoding me response: ", err)
+				http.Error(w, err.Error(), 400)
+				return
+			}
+		} else {
+			http.Error(w, "Not authenticated", 401)
+		}
+	}
+}
+
 func authCallback(w http.ResponseWriter, r *http.Request) {
-	// https://github.com/login/oauth/authorize?scope=user:email,read:org,repo,&client_id=<ClientID>
 	if r.Method != "GET" {
 		http.Error(w, "Invalid auth callback request", 400)
 	}
@@ -182,6 +217,19 @@ func authCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		} else {
 			log.Println("Access token: ", authTokenResponse.AccessToken)
+			githubAuthUsers[authTokenResponse.AccessToken] = &GitHubAuthUser{
+				Email: authTokenResponse.AccessToken,
+			}
+			stateVals, ok := r.URL.Query()["state"]
+			if ok && len(stateVals[0]) >= 1 {
+				state := stateVals[0]
+				log.Println("State: ", state)
+				redirectUrl := strings.Replace(state, "$accessToken", authTokenResponse.AccessToken, -1)
+				http.Redirect(w, r, redirectUrl, 301)
+			} else {
+				http.Redirect(w, r, "/", 301)
+			}
+
 		}
 	}
 }
@@ -207,7 +255,7 @@ func claim(w http.ResponseWriter, r *http.Request) {
 	var claimResponse = ClaimResponse{}
 	var environment *Environment
 	for _, element := range environments {
-		if element.Status == STATUS_IDLE {
+		if element.Status == StatusIdle {
 			environment = element
 			break
 		}
@@ -224,7 +272,7 @@ func claim(w http.ResponseWriter, r *http.Request) {
 		claimResponse.ClaimToken = claimToken.String()
 		// update environment
 		environment.ClaimToken = claimResponse.ClaimToken
-		environment.Status = STATUS_CLAIMED
+		environment.Status = StatusClaimed
 		environment.LastActivity = time.Now().Unix()
 	}
 	err = json.NewEncoder(w).Encode(&claimResponse)
@@ -280,7 +328,7 @@ func ping(w http.ResponseWriter, r *http.Request) {
 	} else {
 		environment.LastActivity = time.Now().Unix()
 		pingResponse.ClaimGranted = true
-		pingResponse.Up = environment.Status == STATUS_RUNNING
+		pingResponse.Up = environment.Status == StatusRunning
 		pingResponse.Repo = environment.Repo
 		pingResponse.Branch = environment.Branch
 		if pingResponse.Up && pingRequest.GetEnvDetails {
@@ -295,7 +343,7 @@ func ping(w http.ResponseWriter, r *http.Request) {
 			if exists {
 				pingResponse.EnvDetails = environment.Details
 			} else {
-				environment.Status = STATUS_CLAIMED
+				environment.Status = StatusClaimed
 				environment.Repo = ""
 				environment.Branch = ""
 				environment.Details = nil
@@ -322,7 +370,7 @@ func info(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	} else if envInfoRequest.Branch == "" {
-		envInfoRequest.Branch = DEFAULT_BRANCH
+		envInfoRequest.Branch = DefaultBranch
 	}
 
 	if whitelistRepos != nil {
@@ -380,7 +428,7 @@ func up(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	} else if envUpRequest.Branch == "" {
-		envUpRequest.Branch = DEFAULT_BRANCH
+		envUpRequest.Branch = DefaultBranch
 	}
 	var environment *Environment
 	for _, element := range environments {
@@ -418,7 +466,7 @@ func up(w http.ResponseWriter, r *http.Request) {
 			return
 		} else if exists {
 			log.Printf("Env deployed for claim %s.\n", environment.Id)
-			if environment.Status == STATUS_RUNNING && strings.EqualFold(envUpRequest.Repo, environment.Repo) && strings.EqualFold(envUpRequest.Branch, environment.Branch) {
+			if environment.Status == StatusRunning && strings.EqualFold(envUpRequest.Repo, environment.Repo) && strings.EqualFold(envUpRequest.Branch, environment.Branch) {
 				log.Println("Returning existing environment details...")
 				envUpResponse = environment.Details
 			}
@@ -426,7 +474,7 @@ func up(w http.ResponseWriter, r *http.Request) {
 		if envUpResponse == nil {
 			log.Println("Creating new deployment...")
 			// change status to claimed, so the scheduler doesn't think it has stopped when the old repo is shutdown
-			environment.Status = STATUS_CLAIMED
+			environment.Status = StatusClaimed
 			details, err := deployEnv(minienvVersion, environment.Id, environment.ClaimToken, nodeNameOverride, envUpRequest.Repo, envUpRequest.Branch, envUpRequest.Username, envUpRequest.Password, envUpRequest.EnvVars, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
 				log.Print("Error creating deployment: ", err)
@@ -434,14 +482,14 @@ func up(w http.ResponseWriter, r *http.Request) {
 				return
 			} else {
 				envUpResponse = getEnvUpResponse(details)
-				environment.Status = STATUS_RUNNING
+				environment.Status = StatusRunning
 				environment.Repo = envUpRequest.Repo
 				environment.Branch = envUpRequest.Branch
 				environment.Details = envUpResponse
 				if envUpRequest.ExpirationSeconds >= 0 {
 					environment.ExpirationSeconds = envUpRequest.ExpirationSeconds
 				} else {
-					environment.ExpirationSeconds = DEFAULT_ENV_EXPIRATION_SECONDS
+					environment.ExpirationSeconds = DefaultEnvExpirationSeconds
 				}
 			}
 		}
@@ -483,10 +531,36 @@ func loadFile(fp string) string {
 	return string(b)
 }
 
+func authorizeThenServe(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		accessToken := r.Header.Get("X-Access-Token")
+		if accessToken == "" {
+			http.Error(w, "Not authenticated", 401)
+			return
+		} else if githubAuthUsers[accessToken] == nil {
+			client := getHttpClient()
+			url := "https://api.github.com/user?access_token=" + accessToken
+			req, err := http.NewRequest("GET", url, nil)
+			req.Header.Add("Accept", "application/json")
+			_, err = client.Do(req)
+			if err != nil {
+				log.Println("Invalid access token: ", err)
+				http.Error(w, "invalid access token", 400)
+				return
+			}
+			githubAuthUsers[accessToken] = &GitHubAuthUser{
+				Email: accessToken,
+			}
+		}
+		handler(w, r)
+	}
+}
+
 func addCorsAndCacheHeadersThenServe(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Access-Control-Allow-Origin", allowOrigin)
 		w.Header().Add("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Add("Access-Control-Allow-Headers", "X-Access-Token")
 		w.Header().Add("Cache-Control", "no-store, must-revalidate")
 		w.Header().Add("Expires", "0")
 		if r.Method == "OPTIONS" {
@@ -517,7 +591,7 @@ func initEnvironments(envCount int) {
 				running = true
 				details  := deploymentDetailsFromString(getDeploymentResp.Spec.Template.Metadata.Annotations.EnvDetails)
 				envUpResponse := getEnvUpResponse(details)
-				environment.Status = STATUS_RUNNING
+				environment.Status = StatusRunning
 				environment.ClaimToken = getDeploymentResp.Spec.Template.Metadata.Annotations.ClaimToken
 				environment.LastActivity = time.Now().Unix()
 				environment.Repo = getDeploymentResp.Spec.Template.Metadata.Annotations.Repo
@@ -530,7 +604,7 @@ func initEnvironments(envCount int) {
 		}
 		if ! running {
 			log.Printf("Provisioning environment %s...\n", environment.Id)
-			environment.Status = STATUS_PROVISIONING
+			environment.Status = StatusProvisioning
 			deployProvisioner(minienvVersion, environment.Id, nodeNameOverride, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionVolumeSize, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		}
 	}
@@ -558,7 +632,7 @@ func initEnvironments(envCount int) {
 }
 
 func startEnvironmentCheckTimer() {
-	timer := time.NewTimer(time.Second * time.Duration(CHECK_ENV_TIMER_SECONDS))
+	timer := time.NewTimer(time.Second * time.Duration(CheckEnvTimerSeconds))
 	go func() {
 		<-timer.C
 		checkEnvironments()
@@ -569,21 +643,21 @@ func checkEnvironments() {
 	for i := 0; i < len(environments); i++ {
 		environment := environments[i]
 		log.Printf("Checking environment %s; current status=%d\n", environment.Id, environment.Status)
-		if environment.Status == STATUS_PROVISIONING {
+		if environment.Status == StatusProvisioning {
 			running, err := isProvisionerRunning(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
 				log.Println("Error checking provisioner status.", err)
 			} else if ! running {
 				log.Printf("Environment %s provisioning complete.\n", environment.Id)
-				environment.Status = STATUS_IDLE
+				environment.Status = StatusIdle
 				deleteProvisioner(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			} else {
 				log.Printf("Environment %s still provisioning...\n", environment.Id)
 			}
-		} else if environment.Status == STATUS_RUNNING {
-			if time.Now().Unix() - environment.LastActivity > DEFAULT_ENV_EXPIRATION_SECONDS {
+		} else if environment.Status == StatusRunning {
+			if time.Now().Unix() - environment.LastActivity > DefaultEnvExpirationSeconds {
 				log.Printf("Environment %s no longer active.\n", environment.Id)
-				environment.Status = STATUS_IDLE
+				environment.Status = StatusIdle
 				environment.ClaimToken = ""
 				environment.LastActivity = 0
 				environment.Repo = ""
@@ -592,14 +666,14 @@ func checkEnvironments() {
 				deleteEnv(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 				// re-provision
 				log.Printf("Re-provisioning environment %s...\n", environment.Id)
-				environment.Status = STATUS_PROVISIONING
+				environment.Status = StatusProvisioning
 				deployProvisioner(minienvVersion, environment.Id, nodeNameOverride, storageDriver, envPvTemplate, envPvcTemplate, provisionerJobTemplate, provisionVolumeSize, provisionImages, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			} else {
 				log.Printf("Checking if environment %s is still deployed...\n", environment.Id)
 				deployed, err := isEnvDeployed(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 				if err == nil && ! deployed {
 					log.Printf("Environment %s no longer deployed.\n", environment.Id)
-					environment.Status = STATUS_IDLE
+					environment.Status = StatusIdle
 					environment.ClaimToken = ""
 					environment.LastActivity = 0
 					environment.Repo = ""
@@ -607,10 +681,10 @@ func checkEnvironments() {
 					environment.Details = nil
 				}
 			}
-		}  else if environment.Status == STATUS_CLAIMED {
-			if time.Now().Unix() - environment.LastActivity > EXPIRE_CLAIM_NO_ACIVITY_SECONDS {
+		}  else if environment.Status == StatusClaimed {
+			if time.Now().Unix() - environment.LastActivity > ExpireClaimNoActivitySeconds {
 				log.Printf("Environment %s claim expired.\n", environment.Id)
-				environment.Status = STATUS_IDLE
+				environment.Status = StatusIdle
 				environment.ClaimToken = ""
 				environment.LastActivity = 0
 				environment.Repo = ""
@@ -632,6 +706,8 @@ func main() {
 	minienvVersion = os.Getenv("MINIENV_VERSION")
 	githubClientId = os.Getenv("MINIENV_GITHUB_CLIENT_ID")
 	githubClientSecret = os.Getenv("MINIENV_GITHUB_CLIENT_SECRET")
+	githubAuthEnabled = githubClientId != "" && githubClientSecret != ""
+	githubAuthUsers = make(map[string]*GitHubAuthUser)
 	envPvcStorageClass = os.Getenv("MINIENV_VOLUME_STORAGE_CLASS")
 	if envPvcStorageClass == "" {
 		envPvHostPath = true
@@ -698,12 +774,12 @@ func main() {
 					if len(elementStrs) == 3 {
 						branch = elementStrs[2]
 					} else {
-						branch = DEFAULT_BRANCH
+						branch = DefaultBranch
 					}
 				} else {
 					name = element
 					url = element
-					branch = DEFAULT_BRANCH
+					branch = DefaultBranch
 				}
 				whitelistRepo := &WhitelistRepo{Name: name, Url: url, Branch: branch}
 				whitelistRepos = append(whitelistRepos, whitelistRepo)
@@ -713,11 +789,12 @@ func main() {
 	initEnvironments(envCount)
 	http.HandleFunc("/", root)
 	http.HandleFunc("/auth/callback", authCallback)
-	http.HandleFunc("/api/claim", addCorsAndCacheHeadersThenServe(claim))
-	http.HandleFunc("/api/ping", addCorsAndCacheHeadersThenServe(ping))
-	http.HandleFunc("/api/info", addCorsAndCacheHeadersThenServe(info))
-	http.HandleFunc("/api/up", addCorsAndCacheHeadersThenServe(up))
-	http.HandleFunc("/api/whitelist", addCorsAndCacheHeadersThenServe(whitelist))
+	http.HandleFunc("/api/me", addCorsAndCacheHeadersThenServe(me))
+	http.HandleFunc("/api/claim", addCorsAndCacheHeadersThenServe(authorizeThenServe(claim)))
+	http.HandleFunc("/api/ping", addCorsAndCacheHeadersThenServe(authorizeThenServe(ping)))
+	http.HandleFunc("/api/info", addCorsAndCacheHeadersThenServe(authorizeThenServe(info)))
+	http.HandleFunc("/api/up", addCorsAndCacheHeadersThenServe(authorizeThenServe(up)))
+	http.HandleFunc("/api/whitelist", addCorsAndCacheHeadersThenServe(authorizeThenServe(whitelist)))
 	err := http.ListenAndServe(":"+os.Args[1], nil)
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
