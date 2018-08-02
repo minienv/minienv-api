@@ -50,6 +50,7 @@ var allowOrigin string
 var whitelistRepos []*WhitelistRepo
 
 type GitHubAuthUser struct {
+	AccessToken string `json:"accessToken"`
 	Email string `json:"email"`
 }
 
@@ -158,20 +159,24 @@ func me(w http.ResponseWriter, r *http.Request) {
 	if accessToken == "" {
 		http.Error(w, "Not authenticated", 401)
 	} else {
-		githubUser := githubAuthUsers[accessToken]
-		if githubUser != nil {
-			meResponse := MeResponse{
-				User: githubUser,
-			}
-			err := json.NewEncoder(w).Encode(&meResponse)
-			if err != nil {
-				log.Println("Error encoding me response: ", err)
-				http.Error(w, err.Error(), 400)
-				return
-			}
-		} else {
-			http.Error(w, "Not authenticated", 401)
+		meWithToken(w, r, accessToken)
+	}
+}
+
+func meWithToken(w http.ResponseWriter, r *http.Request, accessToken string) {
+	githubUser := githubAuthUsers[accessToken]
+	if githubUser != nil {
+		meResponse := MeResponse{
+			User: githubUser,
 		}
+		err := json.NewEncoder(w).Encode(&meResponse)
+		if err != nil {
+			log.Println("Error encoding me response: ", err)
+			http.Error(w, err.Error(), 400)
+			return
+		}
+	} else {
+		http.Error(w, "Not authenticated", 401)
 	}
 }
 
@@ -218,6 +223,7 @@ func authCallback(w http.ResponseWriter, r *http.Request) {
 		} else {
 			log.Println("Access token: ", authTokenResponse.AccessToken)
 			githubAuthUsers[authTokenResponse.AccessToken] = &GitHubAuthUser{
+				AccessToken: authTokenResponse.AccessToken,
 				Email: authTokenResponse.AccessToken,
 			}
 			stateVals, ok := r.URL.Query()["state"]
@@ -227,9 +233,8 @@ func authCallback(w http.ResponseWriter, r *http.Request) {
 				redirectUrl := strings.Replace(state, "$accessToken", authTokenResponse.AccessToken, -1)
 				http.Redirect(w, r, redirectUrl, 301)
 			} else {
-				http.Redirect(w, r, "/", 301)
+				meWithToken(w, r, authTokenResponse.AccessToken)
 			}
-
 		}
 	}
 }
@@ -549,6 +554,7 @@ func authorizeThenServe(handler http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 			githubAuthUsers[accessToken] = &GitHubAuthUser{
+				AccessToken: accessToken,
 				Email: accessToken,
 			}
 		}
@@ -788,7 +794,7 @@ func main() {
 	}
 	initEnvironments(envCount)
 	http.HandleFunc("/", root)
-	http.HandleFunc("/auth/callback", authCallback)
+	http.HandleFunc("/auth/callback", addCorsAndCacheHeadersThenServe(authCallback))
 	http.HandleFunc("/api/me", addCorsAndCacheHeadersThenServe(me))
 	http.HandleFunc("/api/claim", addCorsAndCacheHeadersThenServe(authorizeThenServe(claim)))
 	http.HandleFunc("/api/ping", addCorsAndCacheHeadersThenServe(authorizeThenServe(ping)))
