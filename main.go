@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -12,8 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"bytes"
-
 )
 
 const StatusIdle = 0
@@ -27,10 +24,8 @@ const DefaultEnvExpirationSeconds int64 = 60
 const DefaultBranch = "master"
 
 var minienvVersion = "latest"
-var githubAuthEnabled = false
-var githubAuthUsers map[string]*GitHubAuthUser
-var githubClientId string
-var githubClientSecret string
+var authProvider AuthProvider
+var authUsers map[string]*AuthUser
 var environments []*Environment
 var envPvHostPath bool
 var envPvTemplate string
@@ -49,23 +44,23 @@ var storageDriver string
 var allowOrigin string
 var whitelistRepos []*WhitelistRepo
 
-type GitHubAuthUser struct {
+type AuthHandlerFunc func(http.ResponseWriter, *http.Request, *AuthUser)
+
+type AuthProvider interface {
+	onAuthCallback(parameters map[string][]string) (*AuthUser, error)
+	loginUser(accessToken string) (*AuthUser, error)
+	userCanViewRepo(user *AuthUser, repo string) (bool, error)
+}
+
+type AuthUser struct {
 	AccessToken string `json:"accessToken"`
 	Email string `json:"email"`
+	ReposAllowed []string // TODO:Need to clear or time out, etc
+	ReposDenied []string
 }
 
 type MeResponse struct {
-	User *GitHubAuthUser `json:"user"`
-}
-
-type GitHubAuthTokenRequest struct {
-	ClientId string `json:"client_id"`
-	ClientSecret string `json:"client_secret"`
-	Code string `json:"code"`
-}
-
-type GitHubAuthTokenResponse struct {
-	AccessToken string `json:"access_token"`
+	User *AuthUser `json:"user"`
 }
 
 type WhitelistRepo struct {
@@ -80,13 +75,13 @@ type Environment struct {
 	ClaimToken string
 	LastActivity int64
 	Repo string
+	RepoWithCreds string
 	Branch string
 	Details *EnvUpResponse
 	ExpirationSeconds int64
 }
 
 type ClaimRequest struct {
-	Authorization string `json:"authorization"` // TODO:future support authentication
 }
 
 type ClaimResponse struct {
@@ -154,29 +149,29 @@ func root(w http.ResponseWriter, r *http.Request) {
 func me(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.Error(w, "Invalid me request", 400)
+		return
 	}
 	accessToken := r.Header.Get("X-Access-Token")
 	if accessToken == "" {
 		http.Error(w, "Not authenticated", 401)
-	} else {
-		meWithToken(w, r, accessToken)
+		return
 	}
+	user := authUsers[accessToken]
+	if user == nil {
+		http.Error(w, "Not authenticated", 401)
+		return
+	}
+	meWithUser(w, r, user)
 }
 
-func meWithToken(w http.ResponseWriter, r *http.Request, accessToken string) {
-	githubUser := githubAuthUsers[accessToken]
-	if githubUser != nil {
-		meResponse := MeResponse{
-			User: githubUser,
-		}
-		err := json.NewEncoder(w).Encode(&meResponse)
-		if err != nil {
-			log.Println("Error encoding me response: ", err)
-			http.Error(w, err.Error(), 400)
-			return
-		}
-	} else {
-		http.Error(w, "Not authenticated", 401)
+func meWithUser(w http.ResponseWriter, r *http.Request, user *AuthUser) {
+	meResponse := MeResponse{
+		User: user,
+	}
+	err := json.NewEncoder(w).Encode(&meResponse)
+	if err != nil {
+		log.Println("Error encoding me response: ", err)
+		http.Error(w, err.Error(), 400)
 	}
 }
 
@@ -184,62 +179,16 @@ func authCallback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.Error(w, "Invalid auth callback request", 400)
 	}
-	codeVals, ok := r.URL.Query()["code"]
-	if !ok || len(codeVals[0]) < 1 {
-		http.Error(w, "code missing", 400)
-		return
-	}
-	url := "https://github.com/login/oauth/access_token"
-	authTokenRequest := GitHubAuthTokenRequest{
-		ClientId: githubClientId,
-		ClientSecret: githubClientSecret,
-		Code: codeVals[0],
-	}
-	b, err := json.Marshal(authTokenRequest)
+	user, err := authProvider.onAuthCallback(r.URL.Query())
 	if err != nil {
-		log.Println("Error serializing auth token request: ", err)
-		http.Error(w, "error serializing auth token request", 400)
+		http.Error(w, "Error authenticating user", 400)
 		return
 	}
-	client := getHttpClient()
-	req, err := http.NewRequest("POST", url, bytes.NewReader(b))
-	req.Header.Add("Accept", "application/json")
-	req.Header.Add("Content-Type", "application/json")
-	if len(kubeServiceToken) > 0 {
-		req.Header.Add("Authorization", "Bearer " + kubeServiceToken)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Println("Error getting access token: ", err)
-		http.Error(w, "error getting access token", 400)
-		return
-	} else {
-		var authTokenResponse GitHubAuthTokenResponse
-		err := json.NewDecoder(resp.Body).Decode(&authTokenResponse)
-		if err != nil {
-			log.Println("Error getting access token: ", err)
-			http.Error(w, "error getting access token", 400)
-			return
-		} else {
-			log.Println("Access token: ", authTokenResponse.AccessToken)
-			githubAuthUsers[authTokenResponse.AccessToken] = &GitHubAuthUser{
-				AccessToken: authTokenResponse.AccessToken,
-				Email: authTokenResponse.AccessToken,
-			}
-			stateVals, ok := r.URL.Query()["state"]
-			if ok && len(stateVals[0]) >= 1 {
-				state := stateVals[0]
-				log.Println("State: ", state)
-				redirectUrl := strings.Replace(state, "$accessToken", authTokenResponse.AccessToken, -1)
-				http.Redirect(w, r, redirectUrl, 301)
-			} else {
-				meWithToken(w, r, authTokenResponse.AccessToken)
-			}
-		}
-	}
+	authUsers[user.AccessToken] = user
+	meWithUser(w, r, user)
 }
 
-func claim(w http.ResponseWriter, r *http.Request) {
+func claim(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 	if r.Method != "POST" {
 		http.Error(w, "Invalid claim request", 400)
 	}
@@ -288,7 +237,7 @@ func claim(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func whitelist(w http.ResponseWriter, r *http.Request) {
+func whitelist(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 	if r.Method != "GET" {
 		http.Error(w, "Invalid whitelist request", 400)
 	}
@@ -302,7 +251,7 @@ func whitelist(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func ping(w http.ResponseWriter, r *http.Request) {
+func ping(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 	if r.Method != "POST" {
 		http.Error(w, "Invalid ping request", 400)
 	}
@@ -323,7 +272,13 @@ func ping(w http.ResponseWriter, r *http.Request) {
 	var environment *Environment
 	for _, element := range environments {
 		if element.ClaimToken == pingRequest.ClaimToken {
-			environment = element
+			userCanViewRepo := true
+			if element.Repo != "" && authProvider != nil {
+				userCanViewRepo, _ = authProvider.userCanViewRepo(user, element.Repo)
+			}
+			if userCanViewRepo {
+				environment = element
+			}
 			break
 		}
 	}
@@ -363,7 +318,7 @@ func ping(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func info(w http.ResponseWriter, r *http.Request) {
+func info(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 	if r.Body == nil {
 		http.Error(w, "Invalid request", 400)
 		return
@@ -377,7 +332,6 @@ func info(w http.ResponseWriter, r *http.Request) {
 	} else if envInfoRequest.Branch == "" {
 		envInfoRequest.Branch = DefaultBranch
 	}
-
 	if whitelistRepos != nil {
 		repoWhitelisted := false
 		for _, element := range whitelistRepos {
@@ -421,7 +375,7 @@ func info(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func up(w http.ResponseWriter, r *http.Request) {
+func up(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 	if r.Body == nil {
 		http.Error(w, "Invalid request", 400)
 		return
@@ -516,17 +470,17 @@ func getEnvUpResponse(details *DeploymentDetails) (*EnvUpResponse) {
 	return envUpResponse
 }
 
-func isFileInRepo(gitRepo string, gitBranch string, file string) (bool) {
-	url := fmt.Sprintf("%s/raw/%s/%s", gitRepo, gitBranch, file)
-	client := getHttpClient()
-	req, err := http.NewRequest("GET", url, nil)
-	res, err := client.Do(req)
-	if err != nil || res.StatusCode == 404 {
-		return false
-	} else {
-		return true
-	}
-}
+//func isFileInRepo(gitRepo string, gitBranch string, file string) (bool) {
+//	url := fmt.Sprintf("%s/raw/%s/%s", gitRepo, gitBranch, file)
+//	client := getHttpClient()
+//	req, err := http.NewRequest("GET", url, nil)
+//	res, err := client.Do(req)
+//	if err != nil || res.StatusCode == 404 {
+//		return false
+//	} else {
+//		return true
+//	}
+//}
 
 func loadFile(fp string) string {
 	b, err := ioutil.ReadFile(fp) // just pass the file name
@@ -536,29 +490,27 @@ func loadFile(fp string) string {
 	return string(b)
 }
 
-func authorizeThenServe(handler http.HandlerFunc) http.HandlerFunc {
+func authorizeThenServe(handler AuthHandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if authProvider == nil {
+			handler(w, r, nil)
+			return
+		}
 		accessToken := r.Header.Get("X-Access-Token")
 		if accessToken == "" {
 			http.Error(w, "Not authenticated", 401)
 			return
-		} else if githubAuthUsers[accessToken] == nil {
-			client := getHttpClient()
-			url := "https://api.github.com/user?access_token=" + accessToken
-			req, err := http.NewRequest("GET", url, nil)
-			req.Header.Add("Accept", "application/json")
-			_, err = client.Do(req)
+		}
+		user := authUsers[accessToken]
+		if user == nil {
+			user, err := authProvider.loginUser(accessToken)
 			if err != nil {
-				log.Println("Invalid access token: ", err)
-				http.Error(w, "invalid access token", 400)
+				http.Error(w, "Not authenticated", 401)
 				return
 			}
-			githubAuthUsers[accessToken] = &GitHubAuthUser{
-				AccessToken: accessToken,
-				Email: accessToken,
-			}
+			authUsers[user.AccessToken] = user
 		}
-		handler(w, r)
+		handler(w, r, user)
 	}
 }
 
@@ -591,6 +543,7 @@ func initEnvironments(envCount int) {
 				getDeploymentResp.Spec.Template.Metadata != nil &&
 				getDeploymentResp.Spec.Template.Metadata.Annotations != nil &&
 				getDeploymentResp.Spec.Template.Metadata.Annotations.Repo != "" &&
+				getDeploymentResp.Spec.Template.Metadata.Annotations.RepoWithCreds != "" &&
 				getDeploymentResp.Spec.Template.Metadata.Annotations.ClaimToken != "" &&
 				getDeploymentResp.Spec.Template.Metadata.Annotations.EnvDetails != "" {
 				log.Printf("Loading environment %s from deployment metadata.\n", environment.Id)
@@ -601,6 +554,7 @@ func initEnvironments(envCount int) {
 				environment.ClaimToken = getDeploymentResp.Spec.Template.Metadata.Annotations.ClaimToken
 				environment.LastActivity = time.Now().Unix()
 				environment.Repo = getDeploymentResp.Spec.Template.Metadata.Annotations.Repo
+				environment.RepoWithCreds = getDeploymentResp.Spec.Template.Metadata.Annotations.RepoWithCreds
 				environment.Branch = getDeploymentResp.Spec.Template.Metadata.Annotations.Branch
 				environment.Details = envUpResponse
 			} else {
@@ -710,10 +664,15 @@ func main() {
 		log.Fatalf("Invalid port: %s (%s)\n", os.Args[1], err)
 	}
 	minienvVersion = os.Getenv("MINIENV_VERSION")
-	githubClientId = os.Getenv("MINIENV_GITHUB_CLIENT_ID")
-	githubClientSecret = os.Getenv("MINIENV_GITHUB_CLIENT_SECRET")
-	githubAuthEnabled = githubClientId != "" && githubClientSecret != ""
-	githubAuthUsers = make(map[string]*GitHubAuthUser)
+	githubClientId := os.Getenv("MINIENV_GITHUB_CLIENT_ID")
+	githubClientSecret := os.Getenv("MINIENV_GITHUB_CLIENT_SECRET")
+	authUsers = make(map[string]*AuthUser)
+	if githubClientId != "" && githubClientSecret != "" {
+		authProvider = GitHubAuthProvider{
+			ClientId: githubClientId,
+			ClientSecret: githubClientSecret,
+		}
+	}
 	envPvcStorageClass = os.Getenv("MINIENV_VOLUME_STORAGE_CLASS")
 	if envPvcStorageClass == "" {
 		envPvHostPath = true
@@ -795,12 +754,12 @@ func main() {
 	initEnvironments(envCount)
 	http.HandleFunc("/", root)
 	http.HandleFunc("/auth/callback", addCorsAndCacheHeadersThenServe(authCallback))
-	http.HandleFunc("/api/me", addCorsAndCacheHeadersThenServe(me))
-	http.HandleFunc("/api/claim", addCorsAndCacheHeadersThenServe(authorizeThenServe(claim)))
-	http.HandleFunc("/api/ping", addCorsAndCacheHeadersThenServe(authorizeThenServe(ping)))
-	http.HandleFunc("/api/info", addCorsAndCacheHeadersThenServe(authorizeThenServe(info)))
-	http.HandleFunc("/api/up", addCorsAndCacheHeadersThenServe(authorizeThenServe(up)))
-	http.HandleFunc("/api/whitelist", addCorsAndCacheHeadersThenServe(authorizeThenServe(whitelist)))
+	http.HandleFunc("/me", addCorsAndCacheHeadersThenServe(me))
+	http.HandleFunc("/claim", addCorsAndCacheHeadersThenServe(authorizeThenServe(claim)))
+	http.HandleFunc("/ping", addCorsAndCacheHeadersThenServe(authorizeThenServe(ping)))
+	http.HandleFunc("/info", addCorsAndCacheHeadersThenServe(authorizeThenServe(info)))
+	http.HandleFunc("/up", addCorsAndCacheHeadersThenServe(authorizeThenServe(up)))
+	http.HandleFunc("/whitelist", addCorsAndCacheHeadersThenServe(authorizeThenServe(whitelist)))
 	err := http.ListenAndServe(":"+os.Args[1], nil)
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)

@@ -26,6 +26,7 @@ var VAR_SERVICE_NAME = "$serviceName"
 var VAR_DEPLOYMENT_NAME = "$deploymentName"
 var VAR_APP_LABEL = "$appLabel"
 var VAR_CLAIM_TOKEN = "$claimToken"
+var VAR_GIT_REPO_WITH_CREDS = "$gitRepoWithCreds"
 var VAR_GIT_REPO = "$gitRepo"
 var VAR_GIT_BRANCH = "$gitBranch"
 var VAR_ENV_DETAILS = "$envDetails"
@@ -349,7 +350,9 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	deployment = strings.Replace(deployment, VAR_DEPLOYMENT_NAME, deploymentName, -1)
 	deployment = strings.Replace(deployment, VAR_APP_LABEL, appLabel, -1)
 	deployment = strings.Replace(deployment, VAR_CLAIM_TOKEN, claimToken, -1)
-	deployment = strings.Replace(deployment, VAR_GIT_REPO, gitRepoWithCreds, -1)
+	// make sure this replace is done before gitRepo
+	deployment = strings.Replace(deployment, VAR_GIT_REPO_WITH_CREDS, gitRepoWithCreds, -1)
+	deployment = strings.Replace(deployment, VAR_GIT_REPO, gitRepo, -1)
 	deployment = strings.Replace(deployment, VAR_GIT_BRANCH, gitBranch, -1)
 	deployment = strings.Replace(deployment, VAR_ENV_DETAILS, deploymentDetailsStr, -1)
 	deployment = strings.Replace(deployment, VAR_ENV_VARS, envVarsYaml, -1)

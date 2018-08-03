@@ -11,6 +11,7 @@ spec:
       annotations:
         minienv.claimToken: "$claimToken"
         minienv.repo: "$gitRepo"
+        minienv.repoWithCreds: "$gitRepoWithCreds"
         minienv.branch: "$gitBranch"
         minienv.envDetails: "$envDetails"
     spec:
@@ -46,7 +47,7 @@ spec:
           - name: MINIENV_PROXY_PORT
             value: "$proxyPort"
           - name: MINIENV_GIT_REPO
-            value: "$gitRepo"
+            value: "$gitRepoWithCreds"
           - name: MINIENV_GIT_BRANCH
             value: "$gitBranch"
 $envVars
