@@ -15,4 +15,4 @@ spec:
     - protocol: TCP
       port: $proxyPort
       name: "proxy"
-  type: NodePort
+  type: ClusterIP

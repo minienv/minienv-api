@@ -40,6 +40,7 @@ var kubeServiceToken string
 var kubeServiceBaseUrl string
 var kubeNamespace string
 var nodeNameOverride string
+var nodeHostProtocol string
 var storageDriver string
 var allowOrigin string
 var whitelistRepos []*WhitelistRepo
@@ -434,7 +435,7 @@ func up(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 			log.Println("Creating new deployment...")
 			// change status to claimed, so the scheduler doesn't think it has stopped when the old repo is shutdown
 			environment.Status = StatusClaimed
-			details, err := deployEnv(minienvVersion, environment.Id, environment.ClaimToken, nodeNameOverride, envUpRequest.Repo, envUpRequest.Branch, envUpRequest.Username, envUpRequest.Password, envUpRequest.EnvVars, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			details, err := deployEnv(minienvVersion, environment.Id, environment.ClaimToken, nodeNameOverride, nodeHostProtocol, envUpRequest.Repo, envUpRequest.Branch, envUpRequest.Username, envUpRequest.Password, envUpRequest.EnvVars, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
 				log.Print("Error creating deployment: ", err)
 				http.Error(w, err.Error(), 400)
@@ -710,6 +711,7 @@ func main() {
 		kubeNamespace = "default"
 	}
 	nodeNameOverride = os.Getenv("MINIENV_NODE_NAME_OVERRIDE")
+	nodeHostProtocol = os.Getenv("MINIENV_NODE_HOST_PROTOCOL")
 	storageDriver = os.Getenv("MINIENV_STORAGE_DRIVER")
 	if storageDriver == "" {
 		storageDriver = "aufs"

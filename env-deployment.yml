@@ -34,6 +34,8 @@ spec:
                 fieldPath: spec.nodeName
           - name: MINIENV_NODE_NAME_OVERRIDE
             value: "$minienvNodeNameOverride"
+          - name: MINIENV_NODE_HOST_PROTOCOL
+            value: "$minienvNodeHostProtocol"
           - name: MINIENV_VERSION
             value: "$minienvVersion"
           - name: MINIENV_ALLOW_ORIGIN

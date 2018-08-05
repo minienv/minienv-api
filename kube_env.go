@@ -15,16 +15,20 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-var VAR_MINIENV_NODE_NAME_OVERRIDE = "$minienvNodeNameOverride"
-var VAR_MINIENV_VERSION = "$minienvVersion"
+var NodeHostName = os.Getenv("MINIENV_NODE_HOST_NAME")
+var NodeHostProtocol = os.Getenv("MINIENV_NODE_HOST_PROTOCOL")
+
+var VarMinienvNodeNameOverride = "$minienvNodeNameOverride"
+var VarMinienvNodeHostProtocol = "$minienvNodeHostProtocol"
+var VarMinienvVersion = "$minienvVersion"
 var VAR_PV_NAME = "$pvName"
 var VAR_PV_SIZE = "$pvSize"
 var VAR_PV_PATH = "$pvPath"
 var VAR_PVC_NAME = "$pvcName"
 var VAR_PVC_STORAGE_CLASS = "$pvcStorageClass"
-var VAR_SERVICE_NAME = "$serviceName"
+var VarServiceName = "$serviceName"
 var VAR_DEPLOYMENT_NAME = "$deploymentName"
-var VAR_APP_LABEL = "$appLabel"
+var VarAppLabel = "$appLabel"
 var VAR_CLAIM_TOKEN = "$claimToken"
 var VAR_GIT_REPO_WITH_CREDS = "$gitRepoWithCreds"
 var VAR_GIT_REPO = "$gitRepo"
@@ -32,14 +36,14 @@ var VAR_GIT_BRANCH = "$gitBranch"
 var VAR_ENV_DETAILS = "$envDetails"
 var VAR_ENV_VARS = "$envVars"
 var VAR_STORAGE_DRIVER = "$storageDriver"
-var VAR_LOG_PORT = "$logPort"
-var VAR_EDITOR_PORT = "$editorPort"
-var VAR_PROXY_PORT = "$proxyPort"
-var VAR_ALLOW_ORIGIN = "$allowOrigin"
+var VarLogPort = "$logPort"
+var VarEditorPort = "$editorPort"
+var VarProxyPort = "$proxyPort"
+var VarAllowOrigin = "$allowOrigin"
 
-var DEFAULT_LOG_PORT = "30081"
-var DEFAULT_EDITOR_PORT = "30082"
-var DEFAULT_PROXY_PORT = "30083"
+var DefaultLogPort = "8001" //"30081"
+var DefaultEditorPort = "8002" //"30082"
+var DefaultProxyPort = "8003" //"30083"
 
 type MinienvConfig struct {
 	Env *MinienvConfigEnv `json:"env"`
@@ -87,11 +91,11 @@ type Tab struct {
 
 type DeploymentDetails struct {
 	NodeHostName string
-	LogPort int
+	//LogPort int
 	LogUrl string
-	EditorPort int
+	//EditorPort int
 	EditorUrl string
-	ProxyPort int
+	//ProxyPort int
 	Tabs *[]*Tab
 }
 
@@ -153,7 +157,7 @@ func downloadMinienvConfig(gitRepo string, gitBranch string, gitUsername string,
 	return minienvConfig, nil
 }
 
-func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameOverride string, gitRepo string, gitBranch string, gitUsername string, gitPassword string, envVars map[string]string, storageDriver string, pvTemplate string, pvcTemplate string, deploymentTemplate string, serviceTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*DeploymentDetails, error) {
+func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameOverride string, nodeHostProtocol string, gitRepo string, gitBranch string, gitUsername string, gitPassword string, envVars map[string]string, storageDriver string, pvTemplate string, pvcTemplate string, deploymentTemplate string, serviceTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*DeploymentDetails, error) {
 	envVarsYaml := ""
 	if envVars != nil {
 		first := true
@@ -291,64 +295,53 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 			return nil, err
 		}
 	}
+	// ports
+	logPort := DefaultLogPort
+	editorPort := DefaultEditorPort
+	proxyPort := DefaultProxyPort
 	// create the service first - we need the ports to serialize the details with the deployment
 	appLabel := getEnvAppLabel(envId)
 	serviceName := getEnvServiceName(envId)
 	service := serviceTemplate
-	service = strings.Replace(service, VAR_SERVICE_NAME, serviceName, -1)
-	service = strings.Replace(service, VAR_APP_LABEL, appLabel, -1)
-	service = strings.Replace(service, VAR_LOG_PORT, DEFAULT_LOG_PORT, -1)
-	service = strings.Replace(service, VAR_EDITOR_PORT, DEFAULT_EDITOR_PORT, -1)
-	service = strings.Replace(service, VAR_PROXY_PORT, DEFAULT_PROXY_PORT, -1)
-	serviceResp, err := saveService(service, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+	service = strings.Replace(service, VarServiceName, serviceName, -1)
+	service = strings.Replace(service, VarAppLabel, appLabel, -1)
+	service = strings.Replace(service, VarLogPort, logPort, -1)
+	service = strings.Replace(service, VarEditorPort, editorPort, -1)
+	service = strings.Replace(service, VarProxyPort, proxyPort, -1)
+	_, err = saveService(service, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	if err != nil {
 		log.Println("Error saving service: ", err)
 		return nil, err
 	}
-	// get the deployment details - we will serialize them with the deployment
-	logNodePort := 0
-	editorNodePort := 0
-	proxyNodePort := 0
-	for _, element := range serviceResp.Spec.Ports {
-		if element.Name == "log" {
-			logNodePort = element.NodePort
-		}
-		if element.Name == "editor" {
-			editorNodePort = element.NodePort
-		}
-		if element.Name == "proxy" {
-			proxyNodePort = element.NodePort
-		}
-	}
 	details := &DeploymentDetails{}
-	details.NodeHostName = os.Getenv("MINIENV_NODE_HOST_NAME") // mw:TODO
-	details.LogPort = logNodePort
-	details.LogUrl = fmt.Sprintf("http://%s:%d", details.NodeHostName, details.LogPort)
-	details.EditorPort = editorNodePort
-	details.EditorUrl = fmt.Sprintf("http://%s:%d", details.NodeHostName, details.EditorPort)
+	details.NodeHostName = NodeHostName
+	// TODO:use some kind of session id instead of service name?
+	session := envId
+	details.LogUrl = fmt.Sprintf("%s://%s-%s.%s", NodeHostProtocol, session, logPort, details.NodeHostName)
+	details.EditorUrl = fmt.Sprintf("%s://%s-%s.%s", NodeHostProtocol, session, editorPort, details.NodeHostName)
 	if minienvConfig.Editor != nil {
 		if minienvConfig.Editor.Hide {
-			details.EditorPort = 0
 			details.EditorUrl = ""
 		} else if minienvConfig.Editor.SrcDir != "" {
 			details.EditorUrl += "?src=" + url.QueryEscape(minienvConfig.Editor.SrcDir)
 		}
 	}
-	details.ProxyPort = proxyNodePort
 	for _, tab := range tabs {
-		tab.Url = fmt.Sprintf("http://%d.%s:%d%s",tab.Port,details.NodeHostName,details.ProxyPort,tab.Path)
+		tab.Url = fmt.Sprintf("%s://%s-%s-%d.%s%s", NodeHostProtocol, session, proxyPort, tab.Port, details.NodeHostName, tab.Path)
 	}
 	details.Tabs = &tabs
+
 	// create the deployment
 	// TODO: Check if default ports are going to work and if not change them (i.e. if the docker-compose file is using the same ports)
 	gitRepoWithCreds := getUrlWithCredentials(gitRepo, gitUsername, gitPassword)
 	deploymentName := getEnvDeploymentName(envId)
 	deploymentDetailsStr := deploymentDetailsToString(details)
 	deployment := deploymentTemplate
-	deployment = strings.Replace(deployment, VAR_MINIENV_NODE_NAME_OVERRIDE, nodeNameOverride, -1)
-	deployment = strings.Replace(deployment, VAR_MINIENV_VERSION, minienvVersion, -1)
+	deployment = strings.Replace(deployment, VarMinienvNodeNameOverride, nodeNameOverride, -1)
+	deployment = strings.Replace(deployment, VarMinienvNodeHostProtocol, nodeHostProtocol, -1)
+	deployment = strings.Replace(deployment, VarMinienvVersion, minienvVersion, -1)
 	deployment = strings.Replace(deployment, VAR_DEPLOYMENT_NAME, deploymentName, -1)
-	deployment = strings.Replace(deployment, VAR_APP_LABEL, appLabel, -1)
+	deployment = strings.Replace(deployment, VarAppLabel, appLabel, -1)
 	deployment = strings.Replace(deployment, VAR_CLAIM_TOKEN, claimToken, -1)
 	// make sure this replace is done before gitRepo
 	deployment = strings.Replace(deployment, VAR_GIT_REPO_WITH_CREDS, gitRepoWithCreds, -1)
@@ -357,10 +350,10 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	deployment = strings.Replace(deployment, VAR_ENV_DETAILS, deploymentDetailsStr, -1)
 	deployment = strings.Replace(deployment, VAR_ENV_VARS, envVarsYaml, -1)
 	deployment = strings.Replace(deployment, VAR_STORAGE_DRIVER, storageDriver, -1)
-	deployment = strings.Replace(deployment, VAR_LOG_PORT, DEFAULT_LOG_PORT, -1)
-	deployment = strings.Replace(deployment, VAR_EDITOR_PORT, DEFAULT_EDITOR_PORT, -1)
-	deployment = strings.Replace(deployment, VAR_PROXY_PORT, DEFAULT_PROXY_PORT, -1)
-	deployment = strings.Replace(deployment, VAR_ALLOW_ORIGIN, allowOrigin, -1)
+	deployment = strings.Replace(deployment, VarLogPort, DefaultLogPort, -1)
+	deployment = strings.Replace(deployment, VarEditorPort, DefaultEditorPort, -1)
+	deployment = strings.Replace(deployment, VarProxyPort, DefaultProxyPort, -1)
+	deployment = strings.Replace(deployment, VarAllowOrigin, allowOrigin, -1)
 	deployment = strings.Replace(deployment, VAR_PVC_NAME, pvcName, -1)
 	_, err = saveDeployment(deployment, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	if err != nil {

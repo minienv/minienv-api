@@ -6,11 +6,11 @@ import (
 	"strings"
 )
 
-var VAR_JOB_NAME string = "$jobName"
-var VAR_PROVISON_IMAGES string = "$provisionImages"
+var VarJobName string = "$jobName"
+var VarProvisionImages string = "$provisionImages"
 
-var POD_PHASE_SUCCESS = "Succeeded"
-var POD_PHASE_FAILURE = "Failed"
+var PodPhaseSuccess = "Succeeded"
+var PodPhaseFailure = "Failed"
 
 func isProvisionerRunning(envId string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (bool, error) {
 	label := getProvisionerAppLabel(envId)
@@ -26,7 +26,7 @@ func isProvisionerRunning(envId string, kubeServiceToken string, kubeServiceBase
 					log.Printf("Pod found for label '%s'.\n", label)
 					if element.Status != nil && element.Status.Phase != "" {
 						log.Printf("Status for pod '%s' = '%s'.\n", label, element.Status.Phase)
-						if element.Status.Phase != POD_PHASE_SUCCESS && element.Status.Phase != POD_PHASE_FAILURE {
+						if element.Status.Phase != PodPhaseSuccess && element.Status.Phase != PodPhaseFailure {
 							return true, nil
 						}
 					} else {
@@ -106,12 +106,12 @@ func deployProvisioner(minienvVersion string, envId string, nodeNameOverride str
 	jobName := getProvisionerJobName(envId)
 	appLabel := getProvisionerAppLabel(envId)
 	job := jobTemplate
-	job = strings.Replace(job, VAR_MINIENV_NODE_NAME_OVERRIDE, nodeNameOverride, -1)
-	job = strings.Replace(job, VAR_MINIENV_VERSION, minienvVersion, -1)
-	job = strings.Replace(job, VAR_JOB_NAME, jobName, -1)
-	job = strings.Replace(job, VAR_APP_LABEL, appLabel, -1)
+	job = strings.Replace(job, VarMinienvNodeNameOverride, nodeNameOverride, -1)
+	job = strings.Replace(job, VarMinienvVersion, minienvVersion, -1)
+	job = strings.Replace(job, VarJobName, jobName, -1)
+	job = strings.Replace(job, VarAppLabel, appLabel, -1)
 	job = strings.Replace(job, VAR_STORAGE_DRIVER, storageDriver, -1)
-	job = strings.Replace(job, VAR_PROVISON_IMAGES, provisionImages, -1)
+	job = strings.Replace(job, VarProvisionImages, provisionImages, -1)
 	job = strings.Replace(job, VAR_PVC_NAME, pvcName, -1)
 	_, err = saveJob(job, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	if err != nil {
