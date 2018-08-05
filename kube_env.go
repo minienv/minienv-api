@@ -91,11 +91,8 @@ type Tab struct {
 
 type DeploymentDetails struct {
 	NodeHostName string
-	//LogPort int
 	LogUrl string
-	//EditorPort int
 	EditorUrl string
-	//ProxyPort int
 	Tabs *[]*Tab
 }
 
@@ -315,8 +312,8 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	}
 	details := &DeploymentDetails{}
 	details.NodeHostName = NodeHostName
-	// TODO:use some kind of session id instead of service name?
-	session := envId
+	// TODO:get rid of envId and lookup in Redis, etc
+	session := envId + "$sessionId"
 	details.LogUrl = fmt.Sprintf("%s://%s-%s.%s", NodeHostProtocol, session, logPort, details.NodeHostName)
 	details.EditorUrl = fmt.Sprintf("%s://%s-%s.%s", NodeHostProtocol, session, editorPort, details.NodeHostName)
 	if minienvConfig.Editor != nil {
@@ -330,7 +327,6 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 		tab.Url = fmt.Sprintf("%s://%s-%s-%d.%s%s", NodeHostProtocol, session, proxyPort, tab.Port, details.NodeHostName, tab.Path)
 	}
 	details.Tabs = &tabs
-
 	// create the deployment
 	// TODO: Check if default ports are going to work and if not change them (i.e. if the docker-compose file is using the same ports)
 	gitRepoWithCreds := getUrlWithCredentials(gitRepo, gitUsername, gitPassword)

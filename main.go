@@ -25,7 +25,8 @@ const DefaultBranch = "master"
 
 var minienvVersion = "latest"
 var authProvider AuthProvider
-var authUsers map[string]*AuthUser
+var sessionsById map[string]*Session
+var usersByAccessToken map[string]*AuthUser
 var environments []*Environment
 var envPvHostPath bool
 var envPvTemplate string
@@ -45,7 +46,7 @@ var storageDriver string
 var allowOrigin string
 var whitelistRepos []*WhitelistRepo
 
-type AuthHandlerFunc func(http.ResponseWriter, *http.Request, *AuthUser)
+type AuthHandlerFunc func(http.ResponseWriter, *http.Request, *AuthUser, *Session)
 
 type AuthProvider interface {
 	onAuthCallback(parameters map[string][]string) (*AuthUser, error)
@@ -56,12 +57,20 @@ type AuthProvider interface {
 type AuthUser struct {
 	AccessToken string `json:"accessToken"`
 	Email string `json:"email"`
+	Username string `json:"username"`
 	ReposAllowed []string // TODO:Need to clear or time out, etc
 	ReposDenied []string
 }
 
-type MeResponse struct {
+type Session struct {
+	Id string `json:"sessionId"`
 	User *AuthUser `json:"user"`
+}
+
+type MeResponse struct {
+	SessionId string `json:"sessionId"`
+	Authenticated bool `json:"authenticated"`
+	Username string `json:"username"`
 }
 
 type WhitelistRepo struct {
@@ -78,7 +87,7 @@ type Environment struct {
 	Repo string
 	RepoWithCreds string
 	Branch string
-	Details *EnvUpResponse
+	Details *DeploymentDetails
 	ExpirationSeconds int64
 }
 
@@ -141,7 +150,21 @@ type EnvUpRequest struct {
 type EnvUpResponse struct {
 	LogUrl string `json:"logUrl"`
 	EditorUrl string `json:"editorUrl"`
-	Tabs *[]*Tab `json:"tabs"`
+	Tabs []Tab `json:"tabs"`
+}
+
+func getOrCreateSession(r *http.Request) *Session {
+	sessionId := r.Header.Get("Minienv-Session-Id")
+	var session *Session = nil
+	if sessionId == "" || sessionsById[sessionId] == nil {
+		uuid, _ := uuid.NewRandom()
+		sessionId = strings.Replace(uuid.String(), "-", "", -1)
+		session = &Session{Id: sessionId, User: nil}
+		sessionsById[sessionId] = session
+	} else {
+		session = sessionsById[sessionId]
+	}
+	return session
 }
 
 func root(w http.ResponseWriter, r *http.Request) {
@@ -152,22 +175,13 @@ func me(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid me request", 400)
 		return
 	}
-	accessToken := r.Header.Get("X-Access-Token")
-	if accessToken == "" {
-		http.Error(w, "Not authenticated", 401)
-		return
-	}
-	user := authUsers[accessToken]
-	if user == nil {
-		http.Error(w, "Not authenticated", 401)
-		return
-	}
-	meWithUser(w, r, user)
+	meWithSession(w, r, getOrCreateSession(r))
 }
 
-func meWithUser(w http.ResponseWriter, r *http.Request, user *AuthUser) {
+func meWithSession(w http.ResponseWriter, r *http.Request, session *Session) {
 	meResponse := MeResponse{
-		User: user,
+		SessionId: session.Id,
+		Authenticated: session.User != nil,
 	}
 	err := json.NewEncoder(w).Encode(&meResponse)
 	if err != nil {
@@ -177,6 +191,7 @@ func meWithUser(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 }
 
 func authCallback(w http.ResponseWriter, r *http.Request) {
+	session := getOrCreateSession(r)
 	if r.Method != "GET" {
 		http.Error(w, "Invalid auth callback request", 400)
 	}
@@ -185,11 +200,12 @@ func authCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error authenticating user", 400)
 		return
 	}
-	authUsers[user.AccessToken] = user
-	meWithUser(w, r, user)
+	usersByAccessToken[user.AccessToken] = user
+	session.User = user
+	meWithSession(w, r, session)
 }
 
-func claim(w http.ResponseWriter, r *http.Request, user *AuthUser) {
+func claim(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Session) {
 	if r.Method != "POST" {
 		http.Error(w, "Invalid claim request", 400)
 	}
@@ -223,8 +239,9 @@ func claim(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 		log.Printf("Claimed environment %s.\n", environment.Id)
 		// ok, grant claim and create new environment
 		claimToken, _ := uuid.NewRandom()
+		claimTokenStr := strings.Replace(claimToken.String(), "-", "", -1)
 		claimResponse.ClaimGranted = true
-		claimResponse.ClaimToken = claimToken.String()
+		claimResponse.ClaimToken = claimTokenStr
 		// update environment
 		environment.ClaimToken = claimResponse.ClaimToken
 		environment.Status = StatusClaimed
@@ -238,7 +255,7 @@ func claim(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 	}
 }
 
-func whitelist(w http.ResponseWriter, r *http.Request, user *AuthUser) {
+func whitelist(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Session) {
 	if r.Method != "GET" {
 		http.Error(w, "Invalid whitelist request", 400)
 	}
@@ -252,7 +269,7 @@ func whitelist(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 	}
 }
 
-func ping(w http.ResponseWriter, r *http.Request, user *AuthUser) {
+func ping(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Session) {
 	if r.Method != "POST" {
 		http.Error(w, "Invalid ping request", 400)
 	}
@@ -302,7 +319,7 @@ func ping(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 			}
 			pingResponse.Up = exists
 			if exists {
-				pingResponse.EnvDetails = environment.Details
+				pingResponse.EnvDetails = getEnvUpResponse(environment.Details, session.Id)
 			} else {
 				environment.Status = StatusClaimed
 				environment.Repo = ""
@@ -319,7 +336,7 @@ func ping(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 	}
 }
 
-func info(w http.ResponseWriter, r *http.Request, user *AuthUser) {
+func info(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Session) {
 	if r.Body == nil {
 		http.Error(w, "Invalid request", 400)
 		return
@@ -376,7 +393,7 @@ func info(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 	}
 }
 
-func up(w http.ResponseWriter, r *http.Request, user *AuthUser) {
+func up(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Session) {
 	if r.Body == nil {
 		http.Error(w, "Invalid request", 400)
 		return
@@ -416,6 +433,11 @@ func up(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 				return
 			}
 		}
+		// get session id if not null (can be null if called from probot)
+		sessionId := ""
+		if session != nil {
+			sessionId = session.Id
+		}
 		// create response
 		var envUpResponse *EnvUpResponse
 		log.Printf("Checking if deployment exists for env %s...\n", environment.Id)
@@ -428,7 +450,7 @@ func up(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 			log.Printf("Env deployed for claim %s.\n", environment.Id)
 			if environment.Status == StatusRunning && strings.EqualFold(envUpRequest.Repo, environment.Repo) && strings.EqualFold(envUpRequest.Branch, environment.Branch) {
 				log.Println("Returning existing environment details...")
-				envUpResponse = environment.Details
+				envUpResponse = getEnvUpResponse(environment.Details, sessionId)
 			}
 		}
 		if envUpResponse == nil {
@@ -441,11 +463,11 @@ func up(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 				http.Error(w, err.Error(), 400)
 				return
 			} else {
-				envUpResponse = getEnvUpResponse(details)
+				envUpResponse = getEnvUpResponse(details, sessionId)
 				environment.Status = StatusRunning
 				environment.Repo = envUpRequest.Repo
 				environment.Branch = envUpRequest.Branch
-				environment.Details = envUpResponse
+				environment.Details = details
 				if envUpRequest.ExpirationSeconds >= 0 {
 					environment.ExpirationSeconds = envUpRequest.ExpirationSeconds
 				} else {
@@ -463,11 +485,22 @@ func up(w http.ResponseWriter, r *http.Request, user *AuthUser) {
 	}
 }
 
-func getEnvUpResponse(details *DeploymentDetails) (*EnvUpResponse) {
+func getEnvUpResponse(details *DeploymentDetails, sessionId string) (*EnvUpResponse) {
 	envUpResponse := &EnvUpResponse{}
-	envUpResponse.LogUrl = details.LogUrl
-	envUpResponse.EditorUrl = details.EditorUrl
-	envUpResponse.Tabs = details.Tabs
+	envUpResponse.LogUrl = strings.Replace(details.LogUrl, "$sessionId", sessionId, -1)
+	envUpResponse.EditorUrl = strings.Replace(details.EditorUrl, "$sessionId", sessionId, -1)
+	envUpResponse.Tabs = []Tab{}
+	if details.Tabs != nil {
+		for _, element := range *details.Tabs {
+			tab := Tab{
+				Port: element.Port,
+				Url: strings.Replace(element.Url, "$sessionId", sessionId, -1),
+				Name: element.Name,
+				Path: element.Path,
+			}
+			envUpResponse.Tabs = append(envUpResponse.Tabs, tab)
+		}
+	}
 	return envUpResponse
 }
 
@@ -494,24 +527,36 @@ func loadFile(fp string) string {
 func authorizeThenServe(handler AuthHandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if authProvider == nil {
-			handler(w, r, nil)
+			handler(w, r, nil, nil)
 			return
 		}
+		sessionId := r.Header.Get("Minienv-Session-Id")
 		accessToken := r.Header.Get("X-Access-Token")
-		if accessToken == "" {
+		if sessionId == "" && accessToken == "" {
 			http.Error(w, "Not authenticated", 401)
 			return
 		}
-		user := authUsers[accessToken]
-		if user == nil {
-			user, err := authProvider.loginUser(accessToken)
-			if err != nil {
+		var user *AuthUser = nil
+		var session *Session = nil
+		if accessToken != "" {
+			user := usersByAccessToken[accessToken]
+			if user == nil {
+				user, err := authProvider.loginUser(accessToken)
+				if err != nil {
+					http.Error(w, "Not authenticated", 401)
+					return
+				}
+				usersByAccessToken[user.AccessToken] = user
+			}
+		} else {
+			session = sessionsById[sessionId]
+			if session == nil || session.User == nil {
 				http.Error(w, "Not authenticated", 401)
 				return
 			}
-			authUsers[user.AccessToken] = user
+			user = session.User
 		}
-		handler(w, r, user)
+		handler(w, r, user, session)
 	}
 }
 
@@ -519,6 +564,7 @@ func addCorsAndCacheHeadersThenServe(handler http.HandlerFunc) http.HandlerFunc 
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Access-Control-Allow-Origin", allowOrigin)
 		w.Header().Add("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Add("Access-Control-Allow-Headers", "Minienv-Session-Id")
 		w.Header().Add("Access-Control-Allow-Headers", "X-Access-Token")
 		w.Header().Add("Cache-Control", "no-store, must-revalidate")
 		w.Header().Add("Expires", "0")
@@ -550,14 +596,13 @@ func initEnvironments(envCount int) {
 				log.Printf("Loading environment %s from deployment metadata.\n", environment.Id)
 				running = true
 				details  := deploymentDetailsFromString(getDeploymentResp.Spec.Template.Metadata.Annotations.EnvDetails)
-				envUpResponse := getEnvUpResponse(details)
 				environment.Status = StatusRunning
 				environment.ClaimToken = getDeploymentResp.Spec.Template.Metadata.Annotations.ClaimToken
 				environment.LastActivity = time.Now().Unix()
 				environment.Repo = getDeploymentResp.Spec.Template.Metadata.Annotations.Repo
 				environment.RepoWithCreds = getDeploymentResp.Spec.Template.Metadata.Annotations.RepoWithCreds
 				environment.Branch = getDeploymentResp.Spec.Template.Metadata.Annotations.Branch
-				environment.Details = envUpResponse
+				environment.Details = details
 			} else {
 				log.Printf("Insufficient deployment metadata for environment %s.\n", environment.Id)
 				deleteEnv(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
@@ -667,7 +712,8 @@ func main() {
 	minienvVersion = os.Getenv("MINIENV_VERSION")
 	githubClientId := os.Getenv("MINIENV_GITHUB_CLIENT_ID")
 	githubClientSecret := os.Getenv("MINIENV_GITHUB_CLIENT_SECRET")
-	authUsers = make(map[string]*AuthUser)
+	sessionsById = make(map[string]*Session)
+	usersByAccessToken = make(map[string]*AuthUser)
 	if githubClientId != "" && githubClientSecret != "" {
 		authProvider = GitHubAuthProvider{
 			ClientId: githubClientId,
