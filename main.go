@@ -25,8 +25,8 @@ const DefaultBranch = "master"
 
 var minienvVersion = "latest"
 var authProvider AuthProvider
-var sessionsById map[string]*Session
-var usersByAccessToken map[string]*AuthUser
+var sessionStore SessionStore
+var userStore UserStore
 var environments []*Environment
 var envPvHostPath bool
 var envPvTemplate string
@@ -46,15 +46,25 @@ var storageDriver string
 var allowOrigin string
 var whitelistRepos []*WhitelistRepo
 
-type AuthHandlerFunc func(http.ResponseWriter, *http.Request, *AuthUser, *Session)
+type AuthHandlerFunc func(http.ResponseWriter, *http.Request, *User, *Session)
 
 type AuthProvider interface {
-	onAuthCallback(parameters map[string][]string) (*AuthUser, error)
-	loginUser(accessToken string) (*AuthUser, error)
-	userCanViewRepo(user *AuthUser, repo string) (bool, error)
+	onAuthCallback(parameters map[string][]string) (*User, error)
+	loginUser(accessToken string) (*User, error)
+	userCanViewRepo(user *User, repo string) (bool, error)
 }
 
-type AuthUser struct {
+type SessionStore interface {
+	setSession(id string, session *Session) (error)
+	getSession(id string) (*Session, error)
+}
+
+type UserStore interface {
+	setUser(accessToken string, user *User) (error)
+	getUser(accessToken string) (*User, error)
+}
+
+type User struct {
 	AccessToken string `json:"accessToken"`
 	Email string `json:"email"`
 	Username string `json:"username"`
@@ -63,8 +73,9 @@ type AuthUser struct {
 }
 
 type Session struct {
-	Id string `json:"sessionId"`
-	User *AuthUser `json:"user"`
+	Id string  `json:"sessionId"`
+	User *User `json:"user"`
+	EnvId string `json:"envId"`
 }
 
 type MeResponse struct {
@@ -156,13 +167,14 @@ type EnvUpResponse struct {
 func getOrCreateSession(r *http.Request) *Session {
 	sessionId := r.Header.Get("Minienv-Session-Id")
 	var session *Session = nil
-	if sessionId == "" || sessionsById[sessionId] == nil {
+	if sessionId != "" {
+		session, _ = sessionStore.getSession(sessionId)
+	}
+	if session == nil {
 		uuid, _ := uuid.NewRandom()
 		sessionId = strings.Replace(uuid.String(), "-", "", -1)
 		session = &Session{Id: sessionId, User: nil}
-		sessionsById[sessionId] = session
-	} else {
-		session = sessionsById[sessionId]
+		sessionStore.setSession(sessionId, session)
 	}
 	return session
 }
@@ -200,12 +212,13 @@ func authCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error authenticating user", 400)
 		return
 	}
-	usersByAccessToken[user.AccessToken] = user
+	userStore.setUser(user.AccessToken, user)
 	session.User = user
+	sessionStore.setSession(session.Id, session)
 	meWithSession(w, r, session)
 }
 
-func claim(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Session) {
+func claim(w http.ResponseWriter, r *http.Request, user *User, session *Session) {
 	if r.Method != "POST" {
 		http.Error(w, "Invalid claim request", 400)
 	}
@@ -255,7 +268,7 @@ func claim(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Sess
 	}
 }
 
-func whitelist(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Session) {
+func whitelist(w http.ResponseWriter, r *http.Request, user *User, session *Session) {
 	if r.Method != "GET" {
 		http.Error(w, "Invalid whitelist request", 400)
 	}
@@ -269,7 +282,7 @@ func whitelist(w http.ResponseWriter, r *http.Request, user *AuthUser, session *
 	}
 }
 
-func ping(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Session) {
+func ping(w http.ResponseWriter, r *http.Request, user *User, session *Session) {
 	if r.Method != "POST" {
 		http.Error(w, "Invalid ping request", 400)
 	}
@@ -319,7 +332,7 @@ func ping(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Sessi
 			}
 			pingResponse.Up = exists
 			if exists {
-				pingResponse.EnvDetails = getEnvUpResponse(environment.Details, session.Id)
+				pingResponse.EnvDetails = getEnvUpResponse(environment.Details, session)
 			} else {
 				environment.Status = StatusClaimed
 				environment.Repo = ""
@@ -336,7 +349,7 @@ func ping(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Sessi
 	}
 }
 
-func info(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Session) {
+func info(w http.ResponseWriter, r *http.Request, user *User, session *Session) {
 	if r.Body == nil {
 		http.Error(w, "Invalid request", 400)
 		return
@@ -393,7 +406,7 @@ func info(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Sessi
 	}
 }
 
-func up(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Session) {
+func up(w http.ResponseWriter, r *http.Request, user *User, session *Session) {
 	if r.Body == nil {
 		http.Error(w, "Invalid request", 400)
 		return
@@ -433,11 +446,6 @@ func up(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Session
 				return
 			}
 		}
-		// get session id if not null (can be null if called from probot)
-		sessionId := ""
-		if session != nil {
-			sessionId = session.Id
-		}
 		// create response
 		var envUpResponse *EnvUpResponse
 		log.Printf("Checking if deployment exists for env %s...\n", environment.Id)
@@ -450,7 +458,7 @@ func up(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Session
 			log.Printf("Env deployed for claim %s.\n", environment.Id)
 			if environment.Status == StatusRunning && strings.EqualFold(envUpRequest.Repo, environment.Repo) && strings.EqualFold(envUpRequest.Branch, environment.Branch) {
 				log.Println("Returning existing environment details...")
-				envUpResponse = getEnvUpResponse(environment.Details, sessionId)
+				envUpResponse = getEnvUpResponse(environment.Details, session)
 			}
 		}
 		if envUpResponse == nil {
@@ -463,7 +471,7 @@ func up(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Session
 				http.Error(w, err.Error(), 400)
 				return
 			} else {
-				envUpResponse = getEnvUpResponse(details, sessionId)
+				envUpResponse = getEnvUpResponse(details, session)
 				environment.Status = StatusRunning
 				environment.Repo = envUpRequest.Repo
 				environment.Branch = envUpRequest.Branch
@@ -485,7 +493,13 @@ func up(w http.ResponseWriter, r *http.Request, user *AuthUser, session *Session
 	}
 }
 
-func getEnvUpResponse(details *DeploymentDetails, sessionId string) (*EnvUpResponse) {
+func getEnvUpResponse(details *DeploymentDetails, session *Session) (*EnvUpResponse) {
+	sessionId := ""
+	if session != nil {
+		sessionId = session.Id
+		session.EnvId = details.EnvId
+		sessionStore.setSession(sessionId, session)
+	}
 	envUpResponse := &EnvUpResponse{}
 	envUpResponse.LogUrl = strings.Replace(details.LogUrl, "$sessionId", sessionId, -1)
 	envUpResponse.EditorUrl = strings.Replace(details.EditorUrl, "$sessionId", sessionId, -1)
@@ -536,20 +550,20 @@ func authorizeThenServe(handler AuthHandlerFunc) http.HandlerFunc {
 			http.Error(w, "Not authenticated", 401)
 			return
 		}
-		var user *AuthUser = nil
+		var user *User = nil
 		var session *Session = nil
 		if accessToken != "" {
-			user := usersByAccessToken[accessToken]
+			user, _ := userStore.getUser(accessToken)
 			if user == nil {
 				user, err := authProvider.loginUser(accessToken)
 				if err != nil {
 					http.Error(w, "Not authenticated", 401)
 					return
 				}
-				usersByAccessToken[user.AccessToken] = user
+				userStore.setUser(accessToken, user)
 			}
 		} else {
-			session = sessionsById[sessionId]
+			session, _ = sessionStore.getSession(sessionId)
 			if session == nil || session.User == nil {
 				http.Error(w, "Not authenticated", 401)
 				return
@@ -712,14 +726,27 @@ func main() {
 	minienvVersion = os.Getenv("MINIENV_VERSION")
 	githubClientId := os.Getenv("MINIENV_GITHUB_CLIENT_ID")
 	githubClientSecret := os.Getenv("MINIENV_GITHUB_CLIENT_SECRET")
-	sessionsById = make(map[string]*Session)
-	usersByAccessToken = make(map[string]*AuthUser)
 	if githubClientId != "" && githubClientSecret != "" {
 		authProvider = GitHubAuthProvider{
 			ClientId: githubClientId,
 			ClientSecret: githubClientSecret,
 		}
 	}
+	redisAddress := os.Getenv("MINIENV_REDIS_ADDRESS")
+	redisPassword := os.Getenv("MINIENV_REDIS_PASSWORD")
+	redisDb := os.Getenv("MINIENV_REDIS_DB")
+	if redisAddress != "" {
+		redisSessionStore, err := NewRedisSessionStore(redisAddress, redisPassword, redisDb)
+		if err != nil {
+			sessionStore = nil
+		} else {
+			sessionStore = redisSessionStore
+		}
+	}
+	if sessionStore == nil {
+		sessionStore = NewInMemorySessionStore()
+	}
+	userStore = NewInMemoryUserStore()
 	envPvcStorageClass = os.Getenv("MINIENV_VOLUME_STORAGE_CLASS")
 	if envPvcStorageClass == "" {
 		envPvHostPath = true

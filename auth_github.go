@@ -35,7 +35,7 @@ type GitHubRepoResponsePermissions struct {
 	Pull bool `json:"pull"`
 }
 
-func (authProvider GitHubAuthProvider) onAuthCallback(parameters map[string][]string) (*AuthUser, error) {
+func (authProvider GitHubAuthProvider) onAuthCallback(parameters map[string][]string) (*User, error) {
 	codeVals, ok := parameters["code"]
 	if !ok || len(codeVals[0]) < 1 {
 		log.Println("GitHub Auth: Missing code parameter")
@@ -70,13 +70,13 @@ func (authProvider GitHubAuthProvider) onAuthCallback(parameters map[string][]st
 		log.Println("GitHub Auth: Error getting access token: ", err)
 		return nil, err
 	}
-	return &AuthUser{
+	return &User{
 		AccessToken: authTokenResponse.AccessToken,
 		Email: authTokenResponse.AccessToken,
 	}, nil
 }
 
-func (authProvider GitHubAuthProvider) loginUser(accessToken string) (*AuthUser, error) {
+func (authProvider GitHubAuthProvider) loginUser(accessToken string) (*User, error) {
 	client := getHttpClient()
 	url := "https://api.github.com/user?access_token=" + accessToken
 	req, err := http.NewRequest("GET", url, nil)
@@ -86,13 +86,13 @@ func (authProvider GitHubAuthProvider) loginUser(accessToken string) (*AuthUser,
 		log.Println("GitHub Auth: Invalid access token: ", err)
 		return nil, err
 	}
-	return &AuthUser{
+	return &User{
 		AccessToken: accessToken,
 		Email: accessToken,
 	}, nil
 }
 
-func (authProvider GitHubAuthProvider) userCanViewRepo(user *AuthUser, repo string) (bool, error) {
+func (authProvider GitHubAuthProvider) userCanViewRepo(user *User, repo string) (bool, error) {
 	for _, element := range user.ReposAllowed {
 		if element == repo {
 			return true, nil

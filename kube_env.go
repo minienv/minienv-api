@@ -91,6 +91,7 @@ type Tab struct {
 
 type DeploymentDetails struct {
 	NodeHostName string
+	EnvId string
 	LogUrl string
 	EditorUrl string
 	Tabs *[]*Tab
@@ -312,10 +313,9 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	}
 	details := &DeploymentDetails{}
 	details.NodeHostName = NodeHostName
-	// TODO:get rid of envId and lookup in Redis, etc
-	session := envId + "$sessionId"
-	details.LogUrl = fmt.Sprintf("%s://%s-%s.%s", NodeHostProtocol, session, logPort, details.NodeHostName)
-	details.EditorUrl = fmt.Sprintf("%s://%s-%s.%s", NodeHostProtocol, session, editorPort, details.NodeHostName)
+	details.EnvId = envId
+	details.LogUrl = fmt.Sprintf("%s://%s-%s.%s", NodeHostProtocol, "$sessionId", logPort, details.NodeHostName)
+	details.EditorUrl = fmt.Sprintf("%s://%s-%s.%s", NodeHostProtocol, "$sessionId", editorPort, details.NodeHostName)
 	if minienvConfig.Editor != nil {
 		if minienvConfig.Editor.Hide {
 			details.EditorUrl = ""
@@ -324,7 +324,7 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 		}
 	}
 	for _, tab := range tabs {
-		tab.Url = fmt.Sprintf("%s://%s-%s-%d.%s%s", NodeHostProtocol, session, proxyPort, tab.Port, details.NodeHostName, tab.Path)
+		tab.Url = fmt.Sprintf("%s://%s-%s-%d.%s%s", NodeHostProtocol, "$sessionId", proxyPort, tab.Port, details.NodeHostName, tab.Path)
 	}
 	details.Tabs = &tabs
 	// create the deployment
