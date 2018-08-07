@@ -378,8 +378,14 @@ func info(w http.ResponseWriter, r *http.Request, user *User, session *Session) 
 		}
 	}
 	// create response
+	username := envInfoRequest.Username
+	password := envInfoRequest.Password
+	if username == "" && user != nil && user.AccessToken != "" {
+		username = "x-access-token"
+		password = user.AccessToken
+	}
 	var envInfoResponse = &EnvInfoResponse{}
-	minienvConfig, err := downloadMinienvConfig(envInfoRequest.Repo, envInfoRequest.Branch, envInfoRequest.Username, envInfoRequest.Password)
+	minienvConfig, err := downloadMinienvConfig(envInfoRequest.Repo, envInfoRequest.Branch, username, password)
 	if err != nil {
 		log.Print("Error getting minienv config: ", err)
 		http.Error(w, err.Error(), 400)
@@ -462,10 +468,16 @@ func up(w http.ResponseWriter, r *http.Request, user *User, session *Session) {
 			}
 		}
 		if envUpResponse == nil {
-			log.Println("Creating new deployment...")
+			log.Printf("Creating new deployment...")
 			// change status to claimed, so the scheduler doesn't think it has stopped when the old repo is shutdown
 			environment.Status = StatusClaimed
-			details, err := deployEnv(minienvVersion, environment.Id, environment.ClaimToken, nodeNameOverride, nodeHostProtocol, envUpRequest.Repo, envUpRequest.Branch, envUpRequest.Username, envUpRequest.Password, envUpRequest.EnvVars, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			username := envUpRequest.Username
+			password := envUpRequest.Password
+			if username == "" && user != nil && user.AccessToken != "" {
+				username = "x-access-token"
+				password = user.AccessToken
+			}
+			details, err := deployEnv(minienvVersion, environment.Id, environment.ClaimToken, nodeNameOverride, nodeHostProtocol, envUpRequest.Repo, envUpRequest.Branch, username, password, envUpRequest.EnvVars, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if err != nil {
 				log.Print("Error creating deployment: ", err)
 				http.Error(w, err.Error(), 400)

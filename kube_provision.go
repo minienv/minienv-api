@@ -75,9 +75,9 @@ func deployProvisioner(minienvVersion string, envId string, nodeNameOverride str
 			return err
 		} else if pvResponse == nil {
 			pv := pvTemplate
-			pv = strings.Replace(pv, VAR_PV_NAME, pvName, -1)
-			pv = strings.Replace(pv, VAR_PV_SIZE, provisionVolumeSize, -1)
-			pv = strings.Replace(pv, VAR_PV_PATH, pvPath, -1)
+			pv = strings.Replace(pv, VarPvName, pvName, -1)
+			pv = strings.Replace(pv, VarPvSize, provisionVolumeSize, -1)
+			pv = strings.Replace(pv, VarPvPath, pvPath, -1)
 			_, err = savePersistentVolume(pv, kubeServiceToken, kubeServiceBaseUrl)
 			if err != nil {
 				log.Println("Error saving persistent volume: ", err)
@@ -93,9 +93,9 @@ func deployProvisioner(minienvVersion string, envId string, nodeNameOverride str
 		return err
 	} else if pvcResponse == nil {
 		pvc := pvcTemplate
-		pvc = strings.Replace(pvc, VAR_PV_SIZE, provisionVolumeSize, -1)
-		pvc = strings.Replace(pvc, VAR_PVC_NAME, pvcName, -1)
-		pvc = strings.Replace(pvc, VAR_PVC_STORAGE_CLASS, envPvcStorageClass, -1)
+		pvc = strings.Replace(pvc, VarPvSize, provisionVolumeSize, -1)
+		pvc = strings.Replace(pvc, VarPvcName, pvcName, -1)
+		pvc = strings.Replace(pvc, VarPvcStorageClass, envPvcStorageClass, -1)
 		_, err = savePersistentVolumeClaim(pvc, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		if err != nil {
 			log.Println("Error saving persistent volume claim: ", err)
@@ -110,9 +110,9 @@ func deployProvisioner(minienvVersion string, envId string, nodeNameOverride str
 	job = strings.Replace(job, VarMinienvVersion, minienvVersion, -1)
 	job = strings.Replace(job, VarJobName, jobName, -1)
 	job = strings.Replace(job, VarAppLabel, appLabel, -1)
-	job = strings.Replace(job, VAR_STORAGE_DRIVER, storageDriver, -1)
+	job = strings.Replace(job, VarStorageDriver, storageDriver, -1)
 	job = strings.Replace(job, VarProvisionImages, provisionImages, -1)
-	job = strings.Replace(job, VAR_PVC_NAME, pvcName, -1)
+	job = strings.Replace(job, VarPvcName, pvcName, -1)
 	_, err = saveJob(job, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	if err != nil {
 		log.Println("Error saving job: ", err)

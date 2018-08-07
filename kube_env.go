@@ -21,21 +21,21 @@ var NodeHostProtocol = os.Getenv("MINIENV_NODE_HOST_PROTOCOL")
 var VarMinienvNodeNameOverride = "$minienvNodeNameOverride"
 var VarMinienvNodeHostProtocol = "$minienvNodeHostProtocol"
 var VarMinienvVersion = "$minienvVersion"
-var VAR_PV_NAME = "$pvName"
-var VAR_PV_SIZE = "$pvSize"
-var VAR_PV_PATH = "$pvPath"
-var VAR_PVC_NAME = "$pvcName"
-var VAR_PVC_STORAGE_CLASS = "$pvcStorageClass"
+var VarPvName = "$pvName"
+var VarPvSize = "$pvSize"
+var VarPvPath = "$pvPath"
+var VarPvcName = "$pvcName"
+var VarPvcStorageClass = "$pvcStorageClass"
 var VarServiceName = "$serviceName"
-var VAR_DEPLOYMENT_NAME = "$deploymentName"
+var VarDeploymentName = "$deploymentName"
 var VarAppLabel = "$appLabel"
-var VAR_CLAIM_TOKEN = "$claimToken"
-var VAR_GIT_REPO_WITH_CREDS = "$gitRepoWithCreds"
-var VAR_GIT_REPO = "$gitRepo"
-var VAR_GIT_BRANCH = "$gitBranch"
-var VAR_ENV_DETAILS = "$envDetails"
-var VAR_ENV_VARS = "$envVars"
-var VAR_STORAGE_DRIVER = "$storageDriver"
+var VarClaimToken = "$claimToken"
+var VarGitRepoWithCreds = "$gitRepoWithCreds"
+var VarGitRepo = "$gitRepo"
+var VarGitBranch = "$gitBranch"
+var VarEnvDetails = "$envDetails"
+var VarEnvVars = "$envVars"
+var VarStorageDriver = "$storageDriver"
 var VarLogPort = "$logPort"
 var VarEditorPort = "$editorPort"
 var VarProxyPort = "$proxyPort"
@@ -267,8 +267,8 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 			return nil, err
 		} else if pvResponse == nil {
 			pv := pvTemplate
-			pv = strings.Replace(pv, VAR_PV_NAME, pvName, -1)
-			pv = strings.Replace(pv, VAR_PV_PATH, pvPath, -1)
+			pv = strings.Replace(pv, VarPvName, pvName, -1)
+			pv = strings.Replace(pv, VarPvPath, pvPath, -1)
 			_, err = savePersistentVolume(pv, kubeServiceToken, kubeServiceBaseUrl)
 			if err != nil {
 				log.Println("Error saving persistent volume: ", err)
@@ -284,9 +284,9 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 		return nil, err
 	} else if pvcResponse == nil {
 		pvc := pvcTemplate
-		pvc = strings.Replace(pvc, VAR_PV_SIZE, provisionVolumeSize, -1)
-		pvc = strings.Replace(pvc, VAR_PVC_NAME, pvcName, -1)
-		pvc = strings.Replace(pvc, VAR_PVC_STORAGE_CLASS, envPvcStorageClass, -1)
+		pvc = strings.Replace(pvc, VarPvSize, provisionVolumeSize, -1)
+		pvc = strings.Replace(pvc, VarPvcName, pvcName, -1)
+		pvc = strings.Replace(pvc, VarPvcStorageClass, envPvcStorageClass, -1)
 		_, err = savePersistentVolumeClaim(pvc, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		if err != nil {
 			log.Println("Error saving persistent volume claim: ", err)
@@ -336,21 +336,21 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	deployment = strings.Replace(deployment, VarMinienvNodeNameOverride, nodeNameOverride, -1)
 	deployment = strings.Replace(deployment, VarMinienvNodeHostProtocol, nodeHostProtocol, -1)
 	deployment = strings.Replace(deployment, VarMinienvVersion, minienvVersion, -1)
-	deployment = strings.Replace(deployment, VAR_DEPLOYMENT_NAME, deploymentName, -1)
+	deployment = strings.Replace(deployment, VarDeploymentName, deploymentName, -1)
 	deployment = strings.Replace(deployment, VarAppLabel, appLabel, -1)
-	deployment = strings.Replace(deployment, VAR_CLAIM_TOKEN, claimToken, -1)
+	deployment = strings.Replace(deployment, VarClaimToken, claimToken, -1)
 	// make sure this replace is done before gitRepo
-	deployment = strings.Replace(deployment, VAR_GIT_REPO_WITH_CREDS, gitRepoWithCreds, -1)
-	deployment = strings.Replace(deployment, VAR_GIT_REPO, gitRepo, -1)
-	deployment = strings.Replace(deployment, VAR_GIT_BRANCH, gitBranch, -1)
-	deployment = strings.Replace(deployment, VAR_ENV_DETAILS, deploymentDetailsStr, -1)
-	deployment = strings.Replace(deployment, VAR_ENV_VARS, envVarsYaml, -1)
-	deployment = strings.Replace(deployment, VAR_STORAGE_DRIVER, storageDriver, -1)
+	deployment = strings.Replace(deployment, VarGitRepoWithCreds, gitRepoWithCreds, -1)
+	deployment = strings.Replace(deployment, VarGitRepo, gitRepo, -1)
+	deployment = strings.Replace(deployment, VarGitBranch, gitBranch, -1)
+	deployment = strings.Replace(deployment, VarEnvDetails, deploymentDetailsStr, -1)
+	deployment = strings.Replace(deployment, VarEnvVars, envVarsYaml, -1)
+	deployment = strings.Replace(deployment, VarStorageDriver, storageDriver, -1)
 	deployment = strings.Replace(deployment, VarLogPort, DefaultLogPort, -1)
 	deployment = strings.Replace(deployment, VarEditorPort, DefaultEditorPort, -1)
 	deployment = strings.Replace(deployment, VarProxyPort, DefaultProxyPort, -1)
 	deployment = strings.Replace(deployment, VarAllowOrigin, allowOrigin, -1)
-	deployment = strings.Replace(deployment, VAR_PVC_NAME, pvcName, -1)
+	deployment = strings.Replace(deployment, VarPvcName, pvcName, -1)
 	_, err = saveDeployment(deployment, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	if err != nil {
 		log.Println("Error saving deployment: ", err)
