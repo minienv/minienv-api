@@ -68,14 +68,13 @@ type User struct {
 	AccessToken string `json:"accessToken"`
 	Email string `json:"email"`
 	Username string `json:"username"`
-	ReposAllowed []string // TODO:Need to clear or time out, etc
-	ReposDenied []string
 }
 
 type Session struct {
 	Id string  `json:"sessionId"`
 	User *User `json:"user"`
 	EnvId string `json:"envId"`
+	EnvServiceName string `json:"envServiceName"`
 }
 
 type MeResponse struct {
@@ -510,6 +509,7 @@ func getEnvUpResponse(details *DeploymentDetails, session *Session) (*EnvUpRespo
 	if session != nil {
 		sessionId = session.Id
 		session.EnvId = details.EnvId
+		session.EnvServiceName = getEnvServiceName(details.EnvId, details.ClaimToken)
 		sessionStore.setSession(sessionId, session)
 	}
 	envUpResponse := &EnvUpResponse{}
@@ -604,6 +604,8 @@ func addCorsAndCacheHeadersThenServe(handler http.HandlerFunc) http.HandlerFunc 
 func initEnvironments(envCount int) {
 	log.Printf("Provisioning %d environments...\n", envCount)
 	for i := 0; i < envCount; i++ {
+		//uuid, _ := uuid.NewRandom()
+		//environmentId := strings.Replace(uuid.String(), "-", "", -1)
 		environment := &Environment{Id: strconv.Itoa(i + 1)}
 		environments = append(environments, environment)
 		// check if environment running
@@ -631,7 +633,7 @@ func initEnvironments(envCount int) {
 				environment.Details = details
 			} else {
 				log.Printf("Insufficient deployment metadata for environment %s.\n", environment.Id)
-				deleteEnv(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+				deleteEnv(environment.Id, environment.ClaimToken, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			}
 		}
 		if ! running {
@@ -648,7 +650,21 @@ func initEnvironments(envCount int) {
 		response, _ := getPersistentVolumeClaim(pvcName, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 		if response != nil {
 			log.Printf("De-provisioning environment %s...\n", envId)
-			deleteEnv(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			// get the deployment in order to find the claim token
+			getDeploymentResp, err := getEnvDeployment(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			if err == nil &&
+				getDeploymentResp != nil &&
+				getDeploymentResp.Spec != nil &&
+				getDeploymentResp.Spec.Template != nil &&
+				getDeploymentResp.Spec.Template.Metadata != nil &&
+				getDeploymentResp.Spec.Template.Metadata.Annotations != nil &&
+				getDeploymentResp.Spec.Template.Metadata.Annotations.ClaimToken != "" {
+				claimToken := getDeploymentResp.Spec.Template.Metadata.Annotations.ClaimToken
+				deleteEnv(envId, claimToken, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			} else {
+				// we still want to call deleteEnv to tear down pvs, etc
+				deleteEnv(envId, "", kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+			}
 			deleteProvisioner(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			deletePersistentVolumeClaim(pvcName, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 			if envPvHostPath {
@@ -689,13 +705,14 @@ func checkEnvironments() {
 		} else if environment.Status == StatusRunning {
 			if time.Now().Unix() - environment.LastActivity > DefaultEnvExpirationSeconds {
 				log.Printf("Environment %s no longer active.\n", environment.Id)
+				claimToken := environment.ClaimToken
 				environment.Status = StatusIdle
 				environment.ClaimToken = ""
 				environment.LastActivity = 0
 				environment.Repo = ""
 				environment.Branch = ""
 				environment.Details = nil
-				deleteEnv(environment.Id, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+				deleteEnv(environment.Id, claimToken, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 				// re-provision
 				log.Printf("Re-provisioning environment %s...\n", environment.Id)
 				environment.Status = StatusProvisioning

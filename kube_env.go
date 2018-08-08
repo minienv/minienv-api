@@ -45,53 +45,61 @@ var DefaultLogPort = "8001" //"30081"
 var DefaultEditorPort = "8002" //"30082"
 var DefaultProxyPort = "8003" //"30083"
 
+type MinienvGitHubConfig struct {
+	Env string `yaml:"env"`
+	Disabled bool `yaml:"disabled`
+	Expiration int `yaml:"expiration`
+	Metadata *MinienvConfig `yaml:"metadata`
+}
+
 type MinienvConfig struct {
-	Env *MinienvConfigEnv `json:"env"`
-	Editor *MinienvConfigEditor `json:"editor"`
-	Proxy *MinienvConfigProxy `json:"proxy"`
+	Env *MinienvConfigEnv `json:"env" yaml:"env"`
+	Editor *MinienvConfigEditor `json:"editor" yaml:"editor`
+	Proxy *MinienvConfigProxy `json:"proxy" yaml:"proxy`
 }
 
 type MinienvConfigEnv struct {
-	Vars *[]MinienvConfigEnvVar `json:"vars"`
+	Vars *[]MinienvConfigEnvVar `json:"vars" yaml:"vars"`
 }
 
 type MinienvConfigEnvVar struct {
-	Name string `json:"name"`
-	DefaultValue string `json:"defaultValue"`
+	Name string `json:"name" yaml:"name"`
+	DefaultValue string `json:"defaultValue" yaml:"defaultValue"`
 }
 
 type MinienvConfigEditor struct {
-	Hide bool `json:"hide"`
-	SrcDir string `json:"srcDir"`
+	Hide bool `json:"hide" yaml:"hide"`
+	SrcDir string `json:"srcDir" yaml:"srcDir"`
 }
 
 type MinienvConfigProxy struct {
-	Ports *[]MinienvConfigProxyPort `json:"ports"`
+	Ports *[]MinienvConfigProxyPort `json:"ports" yaml:"ports"`
 }
 
 type MinienvConfigProxyPort struct {
-	Port int `json:"port"`
-	Hide bool `json:"hide"`
-	Name string `json:"name"`
-	Path string `json:"path"`
-	Tabs *[]MinienvConfigProxyPortTab `json:"tabs"`
+	Port int `json:"port" yaml:"port"`
+	Hide bool `json:"hide" yaml:"hide"`
+	Name string `json:"name" yaml:"name"`
+	Path string `json:"path" yaml:"path"`
+	Tabs *[]MinienvConfigProxyPortTab `json:"tabs" yaml:"tabs"`
 }
 
 type MinienvConfigProxyPortTab struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
+	Name string `json:"name" yaml:"name"`
+	Path string `json:"path" yaml:"path"`
 }
 
 type Tab struct {
-	Port int `json:"port"`
-	Url string `json:"url"`
-	Name string `json:"name"`
-	Path string `json:"path"`
+	Port int `json:"port" yaml:"port"`
+	Url string `json:"url" yaml:"url"`
+	Name string `json:"name" yaml:"name"`
+	Path string `json:"path" yaml:"path"`
 }
 
 type DeploymentDetails struct {
 	NodeHostName string
 	EnvId string
+	ClaimToken string
 	LogUrl string
 	EditorUrl string
 	Tabs *[]*Tab
@@ -110,11 +118,11 @@ func isEnvDeployed(envId string, kubeServiceToken string, kubeServiceBaseUrl str
 	}
 }
 
-func deleteEnv(envId string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) {
+func deleteEnv(envId string, claimToken string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) {
 	log.Printf("Deleting env %s...\n", envId)
 	deploymentName := getEnvDeploymentName(envId)
-	appLabel := getEnvAppLabel(envId)
-	serviceName := getEnvServiceName(envId)
+	appLabel := getEnvAppLabel(envId, claimToken)
+	serviceName := getEnvServiceName(envId, claimToken)
 	_, _ = deleteDeployment(deploymentName, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	_, _ = deleteReplicaSet(appLabel, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	_, _ = deleteService(serviceName, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
@@ -136,23 +144,58 @@ func getDownloadUrl(path string, gitRepo string, gitBranch string, gitUsername s
 	return url
 }
 
-func downloadMinienvConfig(gitRepo string, gitBranch string, gitUsername string, gitPassword string) (MinienvConfig, error) {
+func downloadMinienvGitHubConfig(gitRepo string, gitBranch string, gitUsername string, gitPassword string) (*MinienvGitHubConfig, error) {
+	// download .github/minienv.yml
+	minienvGitHubConfigUrl := getDownloadUrl(".github/minienv.yml", gitRepo, gitBranch, gitUsername, gitPassword)
+	log.Printf("Downloading minienv config from '%s'...\n", minienvGitHubConfigUrl)
+	client := getHttpClient()
+	req, err := http.NewRequest("GET", minienvGitHubConfigUrl, nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	} else if resp.StatusCode == 200 {
+		var minienvGithubConfig MinienvGitHubConfig
+		data, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			log.Println("Error downloading minienv.yml file: ", err)
+			return nil, err
+		}
+		err = yaml.Unmarshal(data, &minienvGithubConfig)
+		if err != nil {
+			log.Println("Error parsing minienv.yml file: ", err)
+			return nil, err
+		} else {
+			return &minienvGithubConfig, nil
+		}
+	} else {
+		return nil, nil
+	}
+}
+
+func downloadMinienvConfig(gitRepo string, gitBranch string, gitUsername string, gitPassword string) (*MinienvConfig, error) {
 	// download minienv.json
-	var minienvConfig MinienvConfig
+	minienvGitHubConfig, err := downloadMinienvGitHubConfig(gitRepo, gitBranch, gitUsername, gitPassword)
+	if minienvGitHubConfig != nil && minienvGitHubConfig.Metadata != nil {
+		return minienvGitHubConfig.Metadata, err
+	}
 	minienvConfigUrl := getDownloadUrl("minienv.json", gitRepo, gitBranch, gitUsername, gitPassword)
-	log.Printf("Downloading minienv config from '%s'...\n", minienvConfigUrl)
+	log.Printf("Downloading minienv.json from '%s'...\n", minienvConfigUrl)
 	client := getHttpClient()
 	req, err := http.NewRequest("GET", minienvConfigUrl, nil)
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Println("Error downloading minienv config: ", err)
-	} else {
+		return nil, err
+	} else if resp.StatusCode == 200 {
+		var minienvConfig MinienvConfig
 		err = json.NewDecoder(resp.Body).Decode(&minienvConfig)
 		if err != nil {
-			return minienvConfig, err
+			return nil, err
+		} else {
+			return &minienvConfig, nil
 		}
+	} else {
+		return nil, nil
 	}
-	return minienvConfig, nil
 }
 
 func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameOverride string, nodeHostProtocol string, gitRepo string, gitBranch string, gitUsername string, gitPassword string, envVars map[string]string, storageDriver string, pvTemplate string, pvcTemplate string, deploymentTemplate string, serviceTemplate string, kubeServiceToken string, kubeServiceBaseUrl string, kubeNamespace string) (*DeploymentDetails, error) {
@@ -170,15 +213,14 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 		}
 	}
 	// delete env, if it exists
-	deleteEnv(envId, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
+	deleteEnv(envId, claimToken, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	// download minienv.json
 	minienvConfig, err := downloadMinienvConfig(gitRepo, gitBranch, gitUsername, gitPassword)
 	if err != nil {
 		log.Println("Error downloading minienv.json", err)
-		return nil, err
 	}
 	// download docker-compose file (first try yml, then yaml)
-	tabs := []*Tab{}
+	var tabs []*Tab
 	dockerComposeUrl := getDownloadUrl("docker-compose.yml", gitRepo, gitBranch, gitUsername, gitPassword)
 	log.Printf("Downloading docker-compose file from '%s'...\n", dockerComposeUrl)
 	client := getHttpClient()
@@ -298,8 +340,8 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	editorPort := DefaultEditorPort
 	proxyPort := DefaultProxyPort
 	// create the service first - we need the ports to serialize the details with the deployment
-	appLabel := getEnvAppLabel(envId)
-	serviceName := getEnvServiceName(envId)
+	appLabel := getEnvAppLabel(envId, claimToken)
+	serviceName := getEnvServiceName(envId, claimToken)
 	service := serviceTemplate
 	service = strings.Replace(service, VarServiceName, serviceName, -1)
 	service = strings.Replace(service, VarAppLabel, appLabel, -1)
@@ -314,6 +356,7 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	details := &DeploymentDetails{}
 	details.NodeHostName = NodeHostName
 	details.EnvId = envId
+	details.ClaimToken = claimToken
 	details.LogUrl = fmt.Sprintf("%s://%s-%s.%s", NodeHostProtocol, "$sessionId", logPort, details.NodeHostName)
 	details.EditorUrl = fmt.Sprintf("%s://%s-%s.%s", NodeHostProtocol, "$sessionId", editorPort, details.NodeHostName)
 	if minienvConfig.Editor != nil {
@@ -424,14 +467,16 @@ func getPersistentVolumeClaimName(envId string) string {
 	return strings.ToLower(fmt.Sprintf("env-%s-pvc", envId))
 }
 
-func getEnvServiceName(envId string) string {
-	return strings.ToLower(fmt.Sprintf("env-%s-service", envId))
-}
-
 func getEnvDeploymentName(envId string) string {
 	return strings.ToLower(fmt.Sprintf("env-%s-deployment", envId))
 }
 
-func getEnvAppLabel(envId string) string {
-	return strings.ToLower(fmt.Sprintf("env-%s-deployment", envId))
+// service name and app label are based on claim token
+// this way users won't mistakenly get access to services and deployments that they shouldn't have access to
+func getEnvServiceName(envId string, claimToken string) string {
+	return strings.ToLower(fmt.Sprintf("env-%s-service-%s", envId, claimToken))
+}
+
+func getEnvAppLabel(envId string, claimToken string) string {
+	return strings.ToLower(fmt.Sprintf("env-%s-app-%s", envId, claimToken))
 }

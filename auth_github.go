@@ -7,7 +7,14 @@ import (
 	"bytes"
 	"errors"
 	"strings"
+	"time"
 )
+
+const CacheRepoAllowedSeconds int64 = 20 * 60
+const CacheRepoDeniedSeconds int64 = 5 * 60
+
+var allUserReposAllowed = make(map[string]map[string]int64)
+var allUserReposDenied = make(map[string]map[string]int64)
 
 type GitHubAuthProvider struct {
 	ClientId string
@@ -93,13 +100,24 @@ func (authProvider GitHubAuthProvider) loginUser(accessToken string) (*User, err
 }
 
 func (authProvider GitHubAuthProvider) userCanViewRepo(user *User, repo string) (bool, error) {
-	for _, element := range user.ReposAllowed {
-		if element == repo {
+	now := int64(time.Now().Unix())
+	userReposAllowed := allUserReposAllowed[user.AccessToken]
+	if userReposAllowed == nil {
+		userReposAllowed = make(map[string]int64)
+		allUserReposAllowed[user.AccessToken] = userReposAllowed
+	}
+	userReposDenied := allUserReposDenied[user.AccessToken]
+	if userReposDenied == nil {
+		userReposDenied = make(map[string]int64)
+		allUserReposDenied[user.AccessToken] = userReposDenied
+	}
+	if expires, ok := userReposAllowed[repo]; ok {
+		if expires > now {
 			return true, nil
 		}
 	}
-	for _, element := range user.ReposDenied {
-		if element == repo {
+	if expires, ok := userReposDenied[repo]; ok {
+		if expires > now {
 			return false, nil
 		}
 	}
@@ -128,10 +146,9 @@ func (authProvider GitHubAuthProvider) userCanViewRepo(user *User, repo string) 
 		}
 	}
 	if canView {
-		user.ReposAllowed = append(user.ReposAllowed, repo)
-		return true, nil
+		userReposAllowed[repo] = now + CacheRepoAllowedSeconds
 	} else {
-		user.ReposDenied = append(user.ReposDenied, repo)
-		return false, nil
+		userReposDenied[repo] = now + CacheRepoDeniedSeconds
 	}
+	return canView, nil
 }

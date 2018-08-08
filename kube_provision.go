@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-var VarJobName string = "$jobName"
-var VarProvisionImages string = "$provisionImages"
+var VarJobName = "$jobName"
+var VarProvisionImages = "$provisionImages"
 
 var PodPhaseSuccess = "Succeeded"
 var PodPhaseFailure = "Failed"
