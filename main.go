@@ -139,6 +139,7 @@ type EnvInfoResponse struct {
 }
 
 type EnvInfoResponseEnv struct {
+	Platform string `json:"platform"`
 	Vars *[]EnvInfoResponseEnvVar `json:"vars"`
 }
 
@@ -391,15 +392,18 @@ func info(w http.ResponseWriter, r *http.Request, user *User, session *Session) 
 		return
 	}
 	if minienvConfig.Env != nil {
-		envVars := []EnvInfoResponseEnvVar{}
-		for _, configEnvVar := range *minienvConfig.Env.Vars {
-			envVar := EnvInfoResponseEnvVar{}
-			envVar.Name = configEnvVar.Name
-			envVar.DefaultValue = configEnvVar.DefaultValue
-			envVars = append(envVars, envVar)
-		}
 		envInfoResponse.Env = &EnvInfoResponseEnv{}
-		envInfoResponse.Env.Vars = &envVars
+		envInfoResponse.Env.Platform = minienvConfig.Env.Platform
+		if minienvConfig.Env.Vars != nil {
+			var envVars []EnvInfoResponseEnvVar
+			for _, configEnvVar := range *minienvConfig.Env.Vars {
+				envVar := EnvInfoResponseEnvVar{}
+				envVar.Name = configEnvVar.Name
+				envVar.DefaultValue = configEnvVar.DefaultValue
+				envVars = append(envVars, envVar)
+			}
+			envInfoResponse.Env.Vars = &envVars
+		}
 	}
 
 	// return response
@@ -477,7 +481,7 @@ func up(w http.ResponseWriter, r *http.Request, user *User, session *Session) {
 				password = user.AccessToken
 			}
 			details, err := deployEnv(minienvVersion, environment.Id, environment.ClaimToken, nodeNameOverride, nodeHostProtocol, envUpRequest.Repo, envUpRequest.Branch, username, password, envUpRequest.EnvVars, storageDriver, envPvTemplate, envPvcTemplate, envDeploymentTemplate, envServiceTemplate, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
-			if err != nil {
+			if err != nil || details == nil {
 				log.Print("Error creating deployment: ", err)
 				http.Error(w, err.Error(), 400)
 				return

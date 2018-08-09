@@ -18,6 +18,8 @@ import (
 var NodeHostName = os.Getenv("MINIENV_NODE_HOST_NAME")
 var NodeHostProtocol = os.Getenv("MINIENV_NODE_HOST_PROTOCOL")
 
+var VarMinienvPlatform = "$minienvPlatform"
+var VarMinienvPlatformPort = "$minienvPlatformPort"
 var VarMinienvNodeNameOverride = "$minienvNodeNameOverride"
 var VarMinienvNodeHostProtocol = "$minienvNodeHostProtocol"
 var VarMinienvVersion = "$minienvVersion"
@@ -59,6 +61,7 @@ type MinienvConfig struct {
 }
 
 type MinienvConfigEnv struct {
+	Platform string `json:"platform" yaml:"platform"`
 	Vars *[]MinienvConfigEnvVar `json:"vars" yaml:"vars"`
 }
 
@@ -219,36 +222,39 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	if err != nil {
 		log.Println("Error downloading minienv.json", err)
 	}
-	// download docker-compose file (first try yml, then yaml)
 	var tabs []*Tab
-	dockerComposeUrl := getDownloadUrl("docker-compose.yml", gitRepo, gitBranch, gitUsername, gitPassword)
-	log.Printf("Downloading docker-compose file from '%s'...\n", dockerComposeUrl)
-	client := getHttpClient()
-	req, err := http.NewRequest("GET", dockerComposeUrl, nil)
-	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != 200 {
-		log.Println("Error downloading docker-compose.yml: ", err)
-		dockerComposeUrl := getDownloadUrl("docker-compose.yaml", gitRepo, gitBranch, gitUsername, gitPassword)
-		req, err = http.NewRequest("GET", dockerComposeUrl, nil)
-		resp, err = client.Do(req)
+	if minienvConfig == nil || minienvConfig.Env == nil || minienvConfig.Env.Platform == "" {
+		// download docker-compose file if platform not specified in minienv config
+		// first try yml, then yaml
+		dockerComposeUrl := getDownloadUrl("docker-compose.yml", gitRepo, gitBranch, gitUsername, gitPassword)
+		log.Printf("Downloading docker-compose file from '%s'...\n", dockerComposeUrl)
+		client := getHttpClient()
+		req, err := http.NewRequest("GET", dockerComposeUrl, nil)
+		resp, err := client.Do(req)
 		if err != nil || resp.StatusCode != 200 {
-			log.Println("Error downloading docker-compose.yaml: ", err)
-			return nil, err
+			log.Println("Error downloading docker-compose.yml: ", err)
+			dockerComposeUrl := getDownloadUrl("docker-compose.yaml", gitRepo, gitBranch, gitUsername, gitPassword)
+			req, err = http.NewRequest("GET", dockerComposeUrl, nil)
+			resp, err = client.Do(req)
+			if err != nil || resp.StatusCode != 200 {
+				log.Println("Error downloading docker-compose.yaml: ", err)
+				return nil, err
+			}
 		}
-	}
-	m := make(map[interface{}]interface{})
-	data, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		log.Println("Error downloading docker-compose file: ", err)
-		return nil, err
-	} else {
-		err = yaml.Unmarshal(data, &m)
+		m := make(map[interface{}]interface{})
+		data, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
-			log.Println("Error parsing docker-compose file: ", err)
+			log.Println("Error downloading docker-compose file: ", err)
 			return nil, err
 		} else {
-			for k, v := range m {
-				populateTabs(v, &tabs, k.(string))
+			err = yaml.Unmarshal(data, &m)
+			if err != nil {
+				log.Println("Error parsing docker-compose file: ", err)
+				return nil, err
+			} else {
+				for k, v := range m {
+					populateTabs(v, &tabs, k.(string))
+				}
 			}
 		}
 	}
@@ -256,44 +262,48 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	if minienvConfig.Proxy != nil && minienvConfig.Proxy.Ports != nil && len(*minienvConfig.Proxy.Ports) > 0 {
 		for _, proxyPort := range *minienvConfig.Proxy.Ports {
 			if proxyPort.Hide == true {
-				// ignore
-			} else if proxyPort.Tabs != nil && len(*proxyPort.Tabs) > 0 {
-				for i, proxyTab := range *proxyPort.Tabs {
-					if i == 0 {
-						// update the original docker compose port
-						for _, tab := range tabs {
-							if tab.Port == proxyPort.Port {
-								if proxyTab.Name != "" {
-									tab.Name = proxyTab.Name
-								}
-								if proxyTab.Path != "" {
-									tab.Path = proxyTab.Path
-								}
+				continue
+			}
+			// user can specify one or more tabs for any port
+			// if they only specify one then
+			var configProxyTabs []MinienvConfigProxyPortTab
+			if proxyPort.Tabs != nil && len(*proxyPort.Tabs) > 0 {
+				configProxyTabs = *proxyPort.Tabs
+			} else {
+				configProxyTabs = make([]MinienvConfigProxyPortTab, 1)
+				configProxyTabs[0] = MinienvConfigProxyPortTab{
+					Name: proxyPort.Name,
+					Path: proxyPort.Path,
+				}
+			}
+			for i, proxyTab := range configProxyTabs {
+				tabUpdated := false
+				if i == 0 {
+					// update the original docker compose port if it exists
+					for _, tab := range tabs {
+						if tab.Port == proxyPort.Port {
+							if proxyTab.Name != "" {
+								tab.Name = proxyTab.Name
 							}
-						}
-					} else {
-						// add other docker compose ports
-						tab := &Tab{}
-						tab.Port = proxyPort.Port
-						tab.Name = strconv.Itoa(proxyPort.Port)
-						tabs = append(tabs, tab)
-						if proxyTab.Name != "" {
-							tab.Name = proxyTab.Name
-						}
-						if proxyTab.Path != "" {
-							tab.Path = proxyTab.Path
+							if proxyTab.Path != "" {
+								tab.Path = proxyTab.Path
+							}
+							tabUpdated = true
+							break
 						}
 					}
 				}
-			} else {
-				for _, tab := range tabs {
-					if tab.Port == proxyPort.Port {
-						if proxyPort.Name != "" {
-							tab.Name = proxyPort.Name
-						}
-						if proxyPort.Path != "" {
-							tab.Path = proxyPort.Path
-						}
+				if ! tabUpdated {
+					// add other docker compose ports
+					tab := &Tab{}
+					tab.Port = proxyPort.Port
+					tab.Name = strconv.Itoa(proxyPort.Port)
+					tabs = append(tabs, tab)
+					if proxyTab.Name != "" {
+						tab.Name = proxyTab.Name
+					}
+					if proxyTab.Path != "" {
+						tab.Path = proxyTab.Path
 					}
 				}
 			}
@@ -371,11 +381,20 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	}
 	details.Tabs = &tabs
 	// create the deployment
-	// TODO: Check if default ports are going to work and if not change them (i.e. if the docker-compose file is using the same ports)
+	platform := ""
+	platformPort := ""
+	if minienvConfig != nil && minienvConfig.Env != nil && minienvConfig.Env.Platform != "" {
+		platform = minienvConfig.Env.Platform
+		if len(tabs) > 0 {
+			platformPort = strconv.Itoa(tabs[0].Port)
+		}
+	}
 	gitRepoWithCreds := getUrlWithCredentials(gitRepo, gitUsername, gitPassword)
 	deploymentName := getEnvDeploymentName(envId)
 	deploymentDetailsStr := deploymentDetailsToString(details)
 	deployment := deploymentTemplate
+	deployment = strings.Replace(deployment, VarMinienvPlatformPort, platformPort, -1) // this must be replaced before VarMinienvPlatform
+	deployment = strings.Replace(deployment, VarMinienvPlatform, platform, -1)
 	deployment = strings.Replace(deployment, VarMinienvNodeNameOverride, nodeNameOverride, -1)
 	deployment = strings.Replace(deployment, VarMinienvNodeHostProtocol, nodeHostProtocol, -1)
 	deployment = strings.Replace(deployment, VarMinienvVersion, minienvVersion, -1)
