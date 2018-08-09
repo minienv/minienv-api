@@ -505,22 +505,23 @@ func up(w http.ResponseWriter, r *http.Request, user *User, session *Session) {
 }
 
 func getEnvUpResponse(details *DeploymentDetails, session *Session) (*EnvUpResponse) {
-	sessionId := ""
+	sessionIdStr := ""
 	if session != nil {
-		sessionId = session.Id
+		sessionIdStr = session.Id
 		session.EnvId = details.EnvId
 		session.EnvServiceName = getEnvServiceName(details.EnvId, details.ClaimToken)
-		sessionStore.setSession(sessionId, session)
+		sessionStore.setSession(session.Id, session)
 	}
+	sessionIdStr = strconv.FormatInt(int64(time.Now().Unix()), 16) + "-" + sessionIdStr
 	envUpResponse := &EnvUpResponse{}
-	envUpResponse.LogUrl = strings.Replace(details.LogUrl, "$sessionId", sessionId, -1)
-	envUpResponse.EditorUrl = strings.Replace(details.EditorUrl, "$sessionId", sessionId, -1)
+	envUpResponse.LogUrl = strings.Replace(details.LogUrl, "$sessionId", sessionIdStr, -1)
+	envUpResponse.EditorUrl = strings.Replace(details.EditorUrl, "$sessionId", sessionIdStr, -1)
 	envUpResponse.Tabs = []Tab{}
 	if details.Tabs != nil {
 		for _, element := range *details.Tabs {
 			tab := Tab{
 				Port: element.Port,
-				Url: strings.Replace(element.Url, "$sessionId", sessionId, -1),
+				Url: strings.Replace(element.Url, "$sessionId", sessionIdStr, -1),
 				Name: element.Name,
 				Path: element.Path,
 			}
