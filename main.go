@@ -391,12 +391,11 @@ func info(w http.ResponseWriter, r *http.Request, user *User, session *Session) 
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	if minienvConfig.Env != nil {
+	if minienvConfig.Metadata != nil && minienvConfig.Metadata.Env != nil {
 		envInfoResponse.Env = &EnvInfoResponseEnv{}
-		envInfoResponse.Env.Platform = minienvConfig.Env.Platform
-		if minienvConfig.Env.Vars != nil {
+		if minienvConfig.Metadata.Env.Vars != nil {
 			var envVars []EnvInfoResponseEnvVar
-			for _, configEnvVar := range *minienvConfig.Env.Vars {
+			for _, configEnvVar := range *minienvConfig.Metadata.Env.Vars {
 				envVar := EnvInfoResponseEnvVar{}
 				envVar.Name = configEnvVar.Name
 				envVar.DefaultValue = configEnvVar.DefaultValue

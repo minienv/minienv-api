@@ -19,6 +19,7 @@ var NodeHostName = os.Getenv("MINIENV_NODE_HOST_NAME")
 var NodeHostProtocol = os.Getenv("MINIENV_NODE_HOST_PROTOCOL")
 
 var VarMinienvPlatform = "$minienvPlatform"
+var VarMinienvPlatformCommand = "$minienvPlatformCommand"
 var VarMinienvPlatformPort = "$minienvPlatformPort"
 var VarMinienvNodeNameOverride = "$minienvNodeNameOverride"
 var VarMinienvNodeHostProtocol = "$minienvNodeHostProtocol"
@@ -47,56 +48,54 @@ var DefaultLogPort = "8001" //"30081"
 var DefaultEditorPort = "8002" //"30082"
 var DefaultProxyPort = "8003" //"30083"
 
-type MinienvGitHubConfig struct {
-	Env string `yaml:"env"`
-	Disabled bool `yaml:"disabled`
-	Expiration int `yaml:"expiration`
-	Metadata *MinienvConfig `yaml:"metadata`
-}
-
 type MinienvConfig struct {
-	Env *MinienvConfigEnv `json:"env" yaml:"env"`
-	Editor *MinienvConfigEditor `json:"editor" yaml:"editor`
-	Proxy *MinienvConfigProxy `json:"proxy" yaml:"proxy`
+	Env string                    `yaml:"env"`
+	Disabled bool                 `yaml:"disabled"`
+	Expiration int                `yaml:"expiration"`
+	Runtime *MinienvConfigRuntime `yaml:"runtime"`
+	Metadata *MinienvConfigMeta   `yaml:"metadata"`
 }
 
-type MinienvConfigEnv struct {
-	Platform string `json:"platform" yaml:"platform"`
-	Vars *[]MinienvConfigEnvVar `json:"vars" yaml:"vars"`
+type MinienvConfigRuntime struct {
+	Platform string `yaml:"platform"`
+	Port int `yaml:"port"`
+	Command string `yaml:"command"`
 }
 
-type MinienvConfigEnvVar struct {
-	Name string `json:"name" yaml:"name"`
-	DefaultValue string `json:"defaultValue" yaml:"defaultValue"`
+type MinienvConfigMeta struct {
+	Env       *MinienvConfigMetaEnv       `yaml:"env"`
+	EditorTab *MinienvConfigMetaEditorTab `yaml:"editorTab"`
+	AppTabs   *[]MinienvConfigMetaAppTab    `yaml:"appTabs"`
 }
 
-type MinienvConfigEditor struct {
-	Hide bool `json:"hide" yaml:"hide"`
-	SrcDir string `json:"srcDir" yaml:"srcDir"`
+type MinienvConfigMetaEnv struct {
+	Vars *[]MinienvConfigMetaEnvVar `yaml:"vars"`
 }
 
-type MinienvConfigProxy struct {
-	Ports *[]MinienvConfigProxyPort `json:"ports" yaml:"ports"`
+type MinienvConfigMetaEnvVar struct {
+	Name string `yaml:"name"`
+	DefaultValue string `yaml:"defaultValue"`
 }
 
-type MinienvConfigProxyPort struct {
-	Port int `json:"port" yaml:"port"`
-	Hide bool `json:"hide" yaml:"hide"`
-	Name string `json:"name" yaml:"name"`
-	Path string `json:"path" yaml:"path"`
-	Tabs *[]MinienvConfigProxyPortTab `json:"tabs" yaml:"tabs"`
+type MinienvConfigMetaEditorTab struct {
+	Hide bool `yaml:"hide"`
+	SrcDir string `yaml:"srcDir"`
 }
 
-type MinienvConfigProxyPortTab struct {
-	Name string `json:"name" yaml:"name"`
-	Path string `json:"path" yaml:"path"`
+type MinienvConfigMetaAppTab struct {
+	Port int    `yaml:"port"`
+	Hide bool   `yaml:"hide"`
+	Name string `yaml:"name"`
+	Path string `yaml:"path"`
 }
 
 type Tab struct {
-	Port int `json:"port" yaml:"port"`
-	Url string `json:"url" yaml:"url"`
-	Name string `json:"name" yaml:"name"`
-	Path string `json:"path" yaml:"path"`
+	Port int `json:"port"`
+	Url string `json:"url"`
+	Hide bool   `json:"hide"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+	AppTab *MinienvConfigMetaAppTab
 }
 
 type DeploymentDetails struct {
@@ -147,42 +146,10 @@ func getDownloadUrl(path string, gitRepo string, gitBranch string, gitUsername s
 	return url
 }
 
-func downloadMinienvGitHubConfig(gitRepo string, gitBranch string, gitUsername string, gitPassword string) (*MinienvGitHubConfig, error) {
-	// download .github/minienv.yml
-	minienvGitHubConfigUrl := getDownloadUrl(".github/minienv.yml", gitRepo, gitBranch, gitUsername, gitPassword)
-	log.Printf("Downloading minienv config from '%s'...\n", minienvGitHubConfigUrl)
-	client := getHttpClient()
-	req, err := http.NewRequest("GET", minienvGitHubConfigUrl, nil)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	} else if resp.StatusCode == 200 {
-		var minienvGithubConfig MinienvGitHubConfig
-		data, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			log.Println("Error downloading minienv.yml file: ", err)
-			return nil, err
-		}
-		err = yaml.Unmarshal(data, &minienvGithubConfig)
-		if err != nil {
-			log.Println("Error parsing minienv.yml file: ", err)
-			return nil, err
-		} else {
-			return &minienvGithubConfig, nil
-		}
-	} else {
-		return nil, nil
-	}
-}
-
 func downloadMinienvConfig(gitRepo string, gitBranch string, gitUsername string, gitPassword string) (*MinienvConfig, error) {
-	// download minienv.json
-	minienvGitHubConfig, err := downloadMinienvGitHubConfig(gitRepo, gitBranch, gitUsername, gitPassword)
-	if minienvGitHubConfig != nil && minienvGitHubConfig.Metadata != nil {
-		return minienvGitHubConfig.Metadata, err
-	}
-	minienvConfigUrl := getDownloadUrl("minienv.json", gitRepo, gitBranch, gitUsername, gitPassword)
-	log.Printf("Downloading minienv.json from '%s'...\n", minienvConfigUrl)
+	// download .github/minienv.yml
+	minienvConfigUrl := getDownloadUrl(".github/minienv.yml", gitRepo, gitBranch, gitUsername, gitPassword)
+	log.Printf("Downloading minienv config from '%s'...\n", minienvConfigUrl)
 	client := getHttpClient()
 	req, err := http.NewRequest("GET", minienvConfigUrl, nil)
 	resp, err := client.Do(req)
@@ -190,8 +157,14 @@ func downloadMinienvConfig(gitRepo string, gitBranch string, gitUsername string,
 		return nil, err
 	} else if resp.StatusCode == 200 {
 		var minienvConfig MinienvConfig
-		err = json.NewDecoder(resp.Body).Decode(&minienvConfig)
+		data, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
+			log.Println("Error downloading minienv.yml file: ", err)
+			return nil, err
+		}
+		err = yaml.Unmarshal(data, &minienvConfig)
+		if err != nil {
+			log.Println("Error parsing minienv.yml file: ", err)
 			return nil, err
 		} else {
 			return &minienvConfig, nil
@@ -217,13 +190,13 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	}
 	// delete env, if it exists
 	deleteEnv(envId, claimToken, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
-	// download minienv.json
+	// download minienv config
 	minienvConfig, err := downloadMinienvConfig(gitRepo, gitBranch, gitUsername, gitPassword)
 	if err != nil {
 		log.Println("Error downloading minienv.json", err)
 	}
 	var tabs []*Tab
-	if minienvConfig == nil || minienvConfig.Env == nil || minienvConfig.Env.Platform == "" {
+	if minienvConfig == nil || minienvConfig.Runtime == nil || minienvConfig.Runtime.Platform == "" {
 		// download docker-compose file if platform not specified in minienv config
 		// first try yml, then yaml
 		dockerComposeUrl := getDownloadUrl("docker-compose.yml", gitRepo, gitBranch, gitUsername, gitPassword)
@@ -259,52 +232,37 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 		}
 	}
 	// populate docker compose names and paths
-	if minienvConfig.Proxy != nil && minienvConfig.Proxy.Ports != nil && len(*minienvConfig.Proxy.Ports) > 0 {
-		for _, proxyPort := range *minienvConfig.Proxy.Ports {
-			if proxyPort.Hide == true {
-				continue
-			}
-			// user can specify one or more tabs for any port
-			// if they only specify one then
-			var configProxyTabs []MinienvConfigProxyPortTab
-			if proxyPort.Tabs != nil && len(*proxyPort.Tabs) > 0 {
-				configProxyTabs = *proxyPort.Tabs
-			} else {
-				configProxyTabs = make([]MinienvConfigProxyPortTab, 1)
-				configProxyTabs[0] = MinienvConfigProxyPortTab{
-					Name: proxyPort.Name,
-					Path: proxyPort.Path,
+	if minienvConfig.Metadata != nil && minienvConfig.Metadata.AppTabs != nil && len(*minienvConfig.Metadata.AppTabs) > 0 {
+		for _, appTab := range *minienvConfig.Metadata.AppTabs {
+			tabUpdated := false
+			// update the original docker compose port if it exists
+			for _, tab := range tabs {
+				if tab.Port == appTab.Port && tab.AppTab == nil {
+					tab.AppTab = &appTab
+					tab.Hide = appTab.Hide
+					if appTab.Name != "" {
+						tab.Name = appTab.Name
+					}
+					if appTab.Path != "" {
+						tab.Path = appTab.Path
+					}
+					tabUpdated = true
+					break
 				}
 			}
-			for i, proxyTab := range configProxyTabs {
-				tabUpdated := false
-				if i == 0 {
-					// update the original docker compose port if it exists
-					for _, tab := range tabs {
-						if tab.Port == proxyPort.Port {
-							if proxyTab.Name != "" {
-								tab.Name = proxyTab.Name
-							}
-							if proxyTab.Path != "" {
-								tab.Path = proxyTab.Path
-							}
-							tabUpdated = true
-							break
-						}
-					}
+			if ! tabUpdated {
+				// add other docker compose ports
+				tab := &Tab{}
+				tab.AppTab = &appTab
+				tab.Hide = appTab.Hide
+				tab.Port = appTab.Port
+				tab.Name = strconv.Itoa(appTab.Port)
+				tabs = append(tabs, tab)
+				if appTab.Name != "" {
+					tab.Name = appTab.Name
 				}
-				if ! tabUpdated {
-					// add other docker compose ports
-					tab := &Tab{}
-					tab.Port = proxyPort.Port
-					tab.Name = strconv.Itoa(proxyPort.Port)
-					tabs = append(tabs, tab)
-					if proxyTab.Name != "" {
-						tab.Name = proxyTab.Name
-					}
-					if proxyTab.Path != "" {
-						tab.Path = proxyTab.Path
-					}
+				if appTab.Path != "" {
+					tab.Path = appTab.Path
 				}
 			}
 		}
@@ -369,12 +327,21 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	details.ClaimToken = claimToken
 	details.LogUrl = fmt.Sprintf("%s://%s-%s.%s", NodeHostProtocol, "$sessionId", logPort, details.NodeHostName)
 	details.EditorUrl = fmt.Sprintf("%s://%s-%s.%s", NodeHostProtocol, "$sessionId", editorPort, details.NodeHostName)
-	if minienvConfig.Editor != nil {
-		if minienvConfig.Editor.Hide {
+	if minienvConfig.Metadata != nil && minienvConfig.Metadata.EditorTab != nil {
+		if minienvConfig.Metadata.EditorTab.Hide {
 			details.EditorUrl = ""
-		} else if minienvConfig.Editor.SrcDir != "" {
-			details.EditorUrl += "?src=" + url.QueryEscape(minienvConfig.Editor.SrcDir)
+		} else if minienvConfig.Metadata.EditorTab.SrcDir != "" {
+			details.EditorUrl += "?src=" + url.QueryEscape(minienvConfig.Metadata.EditorTab.SrcDir)
 		}
+	}
+	// add tab based on port if no tabs already provided
+	if len(tabs) == 0 && minienvConfig != nil && minienvConfig.Runtime != nil && minienvConfig.Runtime.Port > 0 {
+		tab := &Tab{}
+		tab.Hide = false
+		tab.Port = minienvConfig.Runtime.Port
+		tab.Name = strconv.Itoa(minienvConfig.Runtime.Port)
+		tab.Path = "/"
+		tabs = append(tabs, tab)
 	}
 	for _, tab := range tabs {
 		tab.Url = fmt.Sprintf("%s://%s-%s-%d.%s%s", NodeHostProtocol, "$sessionId", proxyPort, tab.Port, details.NodeHostName, tab.Path)
@@ -382,10 +349,14 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	details.Tabs = &tabs
 	// create the deployment
 	platform := ""
+	platformCommand := ""
 	platformPort := ""
-	if minienvConfig != nil && minienvConfig.Env != nil && minienvConfig.Env.Platform != "" {
-		platform = minienvConfig.Env.Platform
-		if len(tabs) > 0 {
+	if minienvConfig != nil && minienvConfig.Runtime != nil && minienvConfig.Runtime.Platform != "" {
+		platform = minienvConfig.Runtime.Platform
+		platformCommand = minienvConfig.Runtime.Command
+		if minienvConfig.Runtime.Port > 0 {
+			platformPort = strconv.Itoa(minienvConfig.Runtime.Port)
+		} else if len(tabs) > 0 {
 			platformPort = strconv.Itoa(tabs[0].Port)
 		}
 	}
@@ -394,6 +365,7 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	deploymentDetailsStr := deploymentDetailsToString(details)
 	deployment := deploymentTemplate
 	deployment = strings.Replace(deployment, VarMinienvPlatformPort, platformPort, -1) // this must be replaced before VarMinienvPlatform
+	deployment = strings.Replace(deployment, VarMinienvPlatformCommand, platformCommand, -1) // this must be replaced before VarMinienvPlatform
 	deployment = strings.Replace(deployment, VarMinienvPlatform, platform, -1)
 	deployment = strings.Replace(deployment, VarMinienvNodeNameOverride, nodeNameOverride, -1)
 	deployment = strings.Replace(deployment, VarMinienvNodeHostProtocol, nodeHostProtocol, -1)

@@ -34,6 +34,8 @@ spec:
                 fieldPath: spec.nodeName
           - name: MINIENV_PLATFORM
             value: "$minienvPlatform"
+          - name: MINIENV_PLATFORM_COMMAND
+            value: "$minienvPlatformCommand"
           - name: MINIENV_PLATFORM_PORT
             value: "$minienvPlatformPort"
           - name: MINIENV_NODE_NAME_OVERRIDE
