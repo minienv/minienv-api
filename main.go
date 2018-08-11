@@ -391,7 +391,7 @@ func info(w http.ResponseWriter, r *http.Request, user *User, session *Session) 
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	if minienvConfig.Metadata != nil && minienvConfig.Metadata.Env != nil {
+	if minienvConfig != nil && minienvConfig.Metadata != nil && minienvConfig.Metadata.Env != nil {
 		envInfoResponse.Env = &EnvInfoResponseEnv{}
 		if minienvConfig.Metadata.Env.Vars != nil {
 			var envVars []EnvInfoResponseEnvVar

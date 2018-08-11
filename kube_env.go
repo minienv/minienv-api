@@ -232,7 +232,7 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 		}
 	}
 	// populate docker compose names and paths
-	if minienvConfig.Metadata != nil && minienvConfig.Metadata.AppTabs != nil && len(*minienvConfig.Metadata.AppTabs) > 0 {
+	if minienvConfig != nil && minienvConfig.Metadata != nil && minienvConfig.Metadata.AppTabs != nil && len(*minienvConfig.Metadata.AppTabs) > 0 {
 		for _, appTab := range *minienvConfig.Metadata.AppTabs {
 			tabUpdated := false
 			// update the original docker compose port if it exists
@@ -327,7 +327,7 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	details.ClaimToken = claimToken
 	details.LogUrl = fmt.Sprintf("%s://%s-%s.%s", NodeHostProtocol, "$sessionId", logPort, details.NodeHostName)
 	details.EditorUrl = fmt.Sprintf("%s://%s-%s.%s", NodeHostProtocol, "$sessionId", editorPort, details.NodeHostName)
-	if minienvConfig.Metadata != nil && minienvConfig.Metadata.EditorTab != nil {
+	if minienvConfig != nil && minienvConfig.Metadata != nil && minienvConfig.Metadata.EditorTab != nil {
 		if minienvConfig.Metadata.EditorTab.Hide {
 			details.EditorUrl = ""
 		}
