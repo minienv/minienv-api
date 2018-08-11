@@ -32,32 +32,34 @@ spec:
             valueFrom:
               fieldRef:
                 fieldPath: spec.nodeName
-          - name: MINIENV_PLATFORM
-            value: "$minienvPlatform"
-          - name: MINIENV_PLATFORM_COMMAND
-            value: "$minienvPlatformCommand"
-          - name: MINIENV_PLATFORM_PORT
-            value: "$minienvPlatformPort"
-          - name: MINIENV_NODE_NAME_OVERRIDE
-            value: "$minienvNodeNameOverride"
-          - name: MINIENV_NODE_HOST_PROTOCOL
-            value: "$minienvNodeHostProtocol"
           - name: MINIENV_VERSION
             value: "$minienvVersion"
+          - name: MINIENV_NODE_NAME_OVERRIDE
+            value: "$nodeNameOverride"
+          - name: MINIENV_NODE_HOST_PROTOCOL
+            value: "$nodeHostProtocol"
           - name: MINIENV_ALLOW_ORIGIN
             value: "$allowOrigin"
           - name: MINIENV_STORAGE_DRIVER
             value: "$storageDriver"
-          - name: MINIENV_LOG_PORT
-            value: "$logPort"
-          - name: MINIENV_EDITOR_PORT
-            value: "$editorPort"
-          - name: MINIENV_PROXY_PORT
-            value: "$proxyPort"
+          - name: MINIENV_PLATFORM
+            value: "$platform"
+          - name: MINIENV_PLATFORM_COMMAND
+            value: "$platformCommand"
+          - name: MINIENV_PLATFORM_PORT
+            value: "$platformPort"
           - name: MINIENV_GIT_REPO
             value: "$gitRepoWithCreds"
           - name: MINIENV_GIT_BRANCH
             value: "$gitBranch"
+          - name: MINIENV_PROXY_PORT
+            value: "$proxyPort"
+          - name: MINIENV_LOG_PORT
+            value: "$logPort"
+          - name: MINIENV_EDITOR_PORT
+            value: "$editorPort"
+          - name: MINIENV_EDITOR_SRC_DIR
+            value: "$editorSrcDir"
 $envVars
       volumes:
         - name: docker-storage

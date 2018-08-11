@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"reflect"
 	"strconv"
@@ -18,12 +17,21 @@ import (
 var NodeHostName = os.Getenv("MINIENV_NODE_HOST_NAME")
 var NodeHostProtocol = os.Getenv("MINIENV_NODE_HOST_PROTOCOL")
 
-var VarMinienvPlatform = "$minienvPlatform"
-var VarMinienvPlatformCommand = "$minienvPlatformCommand"
-var VarMinienvPlatformPort = "$minienvPlatformPort"
-var VarMinienvNodeNameOverride = "$minienvNodeNameOverride"
-var VarMinienvNodeHostProtocol = "$minienvNodeHostProtocol"
 var VarMinienvVersion = "$minienvVersion"
+var VarMinienvNodeNameOverride = "$nodeNameOverride"
+var VarMinienvNodeHostProtocol = "$nodeHostProtocol"
+var VarAllowOrigin = "$allowOrigin"
+var VarStorageDriver = "$storageDriver"
+var VarMinienvPlatform = "$platform"
+var VarMinienvPlatformCommand = "$platformCommand"
+var VarMinienvPlatformPort = "$platformPort"
+var VarGitRepo = "$gitRepo"
+var VarGitRepoWithCreds = "$gitRepoWithCreds"
+var VarGitBranch = "$gitBranch"
+var VarProxyPort = "$proxyPort"
+var VarLogPort = "$logPort"
+var VarEditorPort = "$editorPort"
+var VarEditorSrcDir = "$editorSrcDir"
 var VarPvName = "$pvName"
 var VarPvSize = "$pvSize"
 var VarPvPath = "$pvPath"
@@ -33,16 +41,8 @@ var VarServiceName = "$serviceName"
 var VarDeploymentName = "$deploymentName"
 var VarAppLabel = "$appLabel"
 var VarClaimToken = "$claimToken"
-var VarGitRepoWithCreds = "$gitRepoWithCreds"
-var VarGitRepo = "$gitRepo"
-var VarGitBranch = "$gitBranch"
 var VarEnvDetails = "$envDetails"
 var VarEnvVars = "$envVars"
-var VarStorageDriver = "$storageDriver"
-var VarLogPort = "$logPort"
-var VarEditorPort = "$editorPort"
-var VarProxyPort = "$proxyPort"
-var VarAllowOrigin = "$allowOrigin"
 
 var DefaultLogPort = "8001" //"30081"
 var DefaultEditorPort = "8002" //"30082"
@@ -330,8 +330,6 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	if minienvConfig.Metadata != nil && minienvConfig.Metadata.EditorTab != nil {
 		if minienvConfig.Metadata.EditorTab.Hide {
 			details.EditorUrl = ""
-		} else if minienvConfig.Metadata.EditorTab.SrcDir != "" {
-			details.EditorUrl += "?src=" + url.QueryEscape(minienvConfig.Metadata.EditorTab.SrcDir)
 		}
 	}
 	// add tab based on port if no tabs already provided
@@ -351,39 +349,45 @@ func deployEnv(minienvVersion string, envId string, claimToken string, nodeNameO
 	platform := ""
 	platformCommand := ""
 	platformPort := ""
-	if minienvConfig != nil && minienvConfig.Runtime != nil && minienvConfig.Runtime.Platform != "" {
-		platform = minienvConfig.Runtime.Platform
-		platformCommand = minienvConfig.Runtime.Command
-		if minienvConfig.Runtime.Port > 0 {
-			platformPort = strconv.Itoa(minienvConfig.Runtime.Port)
-		} else if len(tabs) > 0 {
-			platformPort = strconv.Itoa(tabs[0].Port)
+	editorSrcDir := ""
+	if minienvConfig != nil {
+		if minienvConfig.Runtime != nil && minienvConfig.Runtime.Platform != "" {
+			platform = minienvConfig.Runtime.Platform
+			platformCommand = minienvConfig.Runtime.Command
+			if minienvConfig.Runtime.Port > 0 {
+				platformPort = strconv.Itoa(minienvConfig.Runtime.Port)
+			} else if len(tabs) > 0 {
+				platformPort = strconv.Itoa(tabs[0].Port)
+			}
+		}
+		if minienvConfig.Metadata != nil && minienvConfig.Metadata.EditorTab != nil {
+			editorSrcDir = minienvConfig.Metadata.EditorTab.SrcDir
 		}
 	}
 	gitRepoWithCreds := getUrlWithCredentials(gitRepo, gitUsername, gitPassword)
 	deploymentName := getEnvDeploymentName(envId)
 	deploymentDetailsStr := deploymentDetailsToString(details)
 	deployment := deploymentTemplate
+	deployment = strings.Replace(deployment, VarMinienvVersion, minienvVersion, -1)
+	deployment = strings.Replace(deployment, VarMinienvNodeNameOverride, nodeNameOverride, -1)
+	deployment = strings.Replace(deployment, VarMinienvNodeHostProtocol, nodeHostProtocol, -1)
+	deployment = strings.Replace(deployment, VarAllowOrigin, allowOrigin, -1)
+	deployment = strings.Replace(deployment, VarStorageDriver, storageDriver, -1)
 	deployment = strings.Replace(deployment, VarMinienvPlatformPort, platformPort, -1) // this must be replaced before VarMinienvPlatform
 	deployment = strings.Replace(deployment, VarMinienvPlatformCommand, platformCommand, -1) // this must be replaced before VarMinienvPlatform
 	deployment = strings.Replace(deployment, VarMinienvPlatform, platform, -1)
-	deployment = strings.Replace(deployment, VarMinienvNodeNameOverride, nodeNameOverride, -1)
-	deployment = strings.Replace(deployment, VarMinienvNodeHostProtocol, nodeHostProtocol, -1)
-	deployment = strings.Replace(deployment, VarMinienvVersion, minienvVersion, -1)
+	deployment = strings.Replace(deployment, VarGitRepoWithCreds, gitRepoWithCreds, -1) // make sure this replace is done before gitRepo
+	deployment = strings.Replace(deployment, VarGitRepo, gitRepo, -1)
+	deployment = strings.Replace(deployment, VarGitBranch, gitBranch, -1)
+	deployment = strings.Replace(deployment, VarProxyPort, DefaultProxyPort, -1)
+	deployment = strings.Replace(deployment, VarLogPort, DefaultLogPort, -1)
+	deployment = strings.Replace(deployment, VarEditorPort, DefaultEditorPort, -1)
+	deployment = strings.Replace(deployment, VarEditorSrcDir, editorSrcDir, -1)
 	deployment = strings.Replace(deployment, VarDeploymentName, deploymentName, -1)
 	deployment = strings.Replace(deployment, VarAppLabel, appLabel, -1)
 	deployment = strings.Replace(deployment, VarClaimToken, claimToken, -1)
-	// make sure this replace is done before gitRepo
-	deployment = strings.Replace(deployment, VarGitRepoWithCreds, gitRepoWithCreds, -1)
-	deployment = strings.Replace(deployment, VarGitRepo, gitRepo, -1)
-	deployment = strings.Replace(deployment, VarGitBranch, gitBranch, -1)
 	deployment = strings.Replace(deployment, VarEnvDetails, deploymentDetailsStr, -1)
 	deployment = strings.Replace(deployment, VarEnvVars, envVarsYaml, -1)
-	deployment = strings.Replace(deployment, VarStorageDriver, storageDriver, -1)
-	deployment = strings.Replace(deployment, VarLogPort, DefaultLogPort, -1)
-	deployment = strings.Replace(deployment, VarEditorPort, DefaultEditorPort, -1)
-	deployment = strings.Replace(deployment, VarProxyPort, DefaultProxyPort, -1)
-	deployment = strings.Replace(deployment, VarAllowOrigin, allowOrigin, -1)
 	deployment = strings.Replace(deployment, VarPvcName, pvcName, -1)
 	_, err = saveDeployment(deployment, kubeServiceToken, kubeServiceBaseUrl, kubeNamespace)
 	if err != nil {
