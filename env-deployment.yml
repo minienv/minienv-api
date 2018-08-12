@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: minienv
-          image: localhost:5000/minienv/minienv:$minienvVersion
+          image: "$minienvImage"
           imagePullPolicy: Always
           volumeMounts:
             - mountPath: "/var/lib/docker"
