@@ -13,6 +13,6 @@ spec:
       port: $editorPort
       name: "editor"
     - protocol: TCP
-      port: $proxyPort
-      name: "proxy"
+      port: $appProxyPort
+      name: "appProxy"
   type: ClusterIP

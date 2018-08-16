@@ -46,8 +46,8 @@ spec:
             value: "$gitRepoWithCreds"
           - name: MINIENV_GIT_BRANCH
             value: "$gitBranch"
-          - name: MINIENV_PROXY_PORT
-            value: "$proxyPort"
+          - name: MINIENV_APP_PROXY_PORT
+            value: "$appProxyPort"
           - name: MINIENV_LOG_PORT
             value: "$logPort"
           - name: MINIENV_EDITOR_PORT
