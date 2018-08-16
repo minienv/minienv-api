@@ -14,5 +14,5 @@ spec:
       name: "editor"
     - protocol: TCP
       port: $appProxyPort
-      name: "appProxy"
+      name: "app-proxy"
   type: ClusterIP
