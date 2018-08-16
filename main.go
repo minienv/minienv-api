@@ -184,7 +184,7 @@ func main() {
 		log.Fatalf("Invalid port: %s (%s)\n", os.Args[1], err)
 	}
 	log.Println("Starting API Server...")
-	apiServer := minienv.ApiServer{}
+	apiServer = &minienv.ApiServer{}
 	apiServer.Init()
 	http.HandleFunc("/", root)
 	http.HandleFunc("/me", apiServer.AddCorsAndCacheHeadersThenServe(me))

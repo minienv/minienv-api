@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: minienv
-          image: "$minienvImage"
+          image: minienv/minienv:0.2.0-DEV
           imagePullPolicy: Always
           volumeMounts:
             - mountPath: "/var/lib/docker"
@@ -42,12 +42,6 @@ spec:
             value: "$allowOrigin"
           - name: MINIENV_STORAGE_DRIVER
             value: "$storageDriver"
-          - name: MINIENV_PLATFORM
-            value: "$platform"
-          - name: MINIENV_PLATFORM_COMMAND
-            value: "$platformCommand"
-          - name: MINIENV_PLATFORM_PORT
-            value: "$platformPort"
           - name: MINIENV_GIT_REPO
             value: "$gitRepoWithCreds"
           - name: MINIENV_GIT_BRANCH
@@ -58,8 +52,6 @@ spec:
             value: "$logPort"
           - name: MINIENV_EDITOR_PORT
             value: "$editorPort"
-          - name: MINIENV_EDITOR_SRC_DIR
-            value: "$editorSrcDir"
 $envVars
       volumes:
         - name: docker-storage
