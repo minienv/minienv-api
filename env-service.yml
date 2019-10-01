@@ -4,7 +4,7 @@ metadata:
   name: $serviceName
 spec:
   selector:
-    app: $appLabel
+    name: $appLabel
   ports:
     - protocol: TCP
       port: $logPort
