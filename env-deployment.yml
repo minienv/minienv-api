@@ -1,13 +1,16 @@
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: Deployment 
 metadata:
   name: $deploymentName
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      name: $appLabel
   template:
     metadata:
       labels:
-        app: $appLabel
+        name: $appLabel
       annotations:
         minienv.claimToken: "$claimToken"
         minienv.repo: "$gitRepo"
