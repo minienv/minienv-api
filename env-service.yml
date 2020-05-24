@@ -4,7 +4,7 @@ metadata:
   name: $serviceName
 spec:
   selector:
-    app: $appLabel
+    name: $appLabel
   ports:
     - protocol: TCP
       port: $logPort
@@ -13,6 +13,6 @@ spec:
       port: $editorPort
       name: "editor"
     - protocol: TCP
-      port: $proxyPort
-      name: "proxy"
-  type: NodePort
+      port: $appProxyPort
+      name: "app-proxy"
+  type: ClusterIP
